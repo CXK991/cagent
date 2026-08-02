@@ -82,6 +82,22 @@ export class SessionStore {
       // File may not exist — that's fine.
     }
   }
+
+  /** Delete a single conversation. */
+  async delete(id: string): Promise<void> {
+    this.sessions = this.sessions.filter((s) => s.id !== id);
+    await this.persist();
+  }
+
+  /** Rename a conversation. Keeps the old title if the new one is empty. */
+  async rename(id: string, title: string): Promise<void> {
+    const s = this.get(id);
+    if (s && title.trim().length > 0) {
+      s.title = title.trim();
+      s.updatedAt = Date.now();
+      await this.persist();
+    }
+  }
 }
 
 function deriveTitle(messages: ChatMessage[]): string {

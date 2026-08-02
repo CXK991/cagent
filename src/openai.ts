@@ -11,6 +11,8 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** Wall-clock timestamp (ms) used to display message times. */
+  ts?: number;
 }
 
 /** A recognized image embedded in a chat message as an OpenAI content part. */

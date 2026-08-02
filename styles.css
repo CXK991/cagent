@@ -264,8 +264,198 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.agent-chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.agent-chat-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.agent-chat-icon-btn:hover {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
+}
+
+/* In-chat search bar */
+.agent-chat-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.agent-chat-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: var(--font-ui-small);
+}
+
+.agent-chat-search-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.agent-chat-search-count {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Search-match highlight */
+.agent-msg.is-search-match .agent-msg-content {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* Message timestamp */
+.agent-msg-time {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75em;
+  opacity: 0.6;
+}
+
+/* Copy button for code blocks */
+.agent-codeblock {
+  position: relative;
+}
+
+.agent-code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 6px;
+  cursor: pointer;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.agent-codeblock:hover .agent-code-copy {
+  opacity: 1;
+}
+
+.agent-code-copy:hover {
+  color: var(--text-accent);
+}
+
+.agent-code-copy.copied {
+  color: var(--text-success);
+  opacity: 1;
+}
+
+/* Session manager modal */
+.agent-session-modal h3 {
+  margin-top: 0;
+}
+
+.agent-session-new {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.agent-session-list {
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-session-empty {
+  color: var(--text-muted);
+  padding: 12px;
+  text-align: center;
+}
+
+.agent-session-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.agent-session-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.agent-session-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-session-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-session-date {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.agent-session-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
+
+.agent-session-btn:hover {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
+}
+
+.agent-session-btn-danger:hover {
+  color: var(--text-error);
+}
+
+.agent-session-rename-input {
+  width: 100%;
+  font-size: var(--font-ui-small);
 }
 
 .agent-chat-usage {

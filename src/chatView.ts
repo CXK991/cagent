@@ -4,6 +4,7 @@ import { truncateText } from "./tools";
 import { SessionStore } from "./sessions";
 import { visionDescribe, type ChatMessage } from "./openai";
 import { t, type Key } from "./i18n";
+import { SessionManagerModal, ConfirmModal } from "./sessionModal";
 import type AgentPlugin from "./main";
 
 /** Max image size sent to the vision API (bytes). */
@@ -37,6 +38,16 @@ export class AgentChatView extends ItemView {
   private sessionId?: string;
   private sessionSelect?: HTMLSelectElement;
 
+  // Rendered bubbles (for in-chat search + highlighting).
+  private bubbles: Array<{ el: HTMLElement; text: string }> = [];
+
+  // In-chat search state.
+  private searchRow?: HTMLElement;
+  private searchInput?: HTMLInputElement;
+  private searchCountEl?: HTMLElement;
+  private searchMatches: HTMLElement[] = [];
+  private searchIdx = -1;
+
   constructor(leaf: WorkspaceLeaf, private plugin: AgentPlugin) {
     super(leaf);
     this.agent = new ObsidianAgent(this.app, plugin.settings, plugin.consent, plugin.undo);
@@ -57,20 +68,54 @@ export class AgentChatView extends ItemView {
     root.empty();
     root.addClass("agent-chat-root");
 
-    // Header: session picker + context usage (left) + refresh action (right).
+    // Header: session picker + context usage (left) + actions (right).
     const header = root.createDiv({ cls: "agent-chat-header" });
-    this.sessionSelect = header.createEl("select", { cls: "agent-chat-sessions" });
+    const left = header.createDiv({ cls: "agent-chat-header-left" });
+    this.sessionSelect = left.createEl("select", { cls: "agent-chat-sessions" });
     this.sessionSelect.addEventListener("change", () => {
       const id = this.sessionSelect?.value;
       if (id && id !== this.sessionId) this.loadSession(id);
     });
-    this.usageEl = header.createSpan({ cls: "agent-chat-usage", text: "context ≈ 0 tok" });
-    const refreshBtn = header.createEl("button", {
-      cls: "agent-chat-refresh",
-      attr: { "aria-label": this.tr("newConversation") },
+    this.usageEl = left.createSpan({ cls: "agent-chat-usage", text: "context ≈ 0 tok" });
+
+    const actions = header.createDiv({ cls: "agent-chat-header-actions" });
+    const mkBtn = (icon: string, label: string, cb: () => void): HTMLButtonElement => {
+      const b = actions.createEl("button", { cls: "agent-chat-icon-btn", attr: { "aria-label": label } });
+      setIcon(b, icon);
+      b.addEventListener("click", cb);
+      return b;
+    };
+
+    mkBtn("search", this.tr("searchOpen"), () => this.toggleSearch());
+    mkBtn("list", this.tr("sessionManagerTitle"), () => {
+      new SessionManagerModal(this.app, this.plugin, (id) => this.loadSession(id), () => this.resetConversation()).open();
     });
-    setIcon(refreshBtn, "rotate-ccw");
-    refreshBtn.addEventListener("click", () => { this.resetConversation(); });
+    mkBtn("download", this.tr("exportSession"), () => void this.exportSession());
+    mkBtn("trash", this.tr("clearCurrent"), () => this.clearCurrentSession());
+    mkBtn("rotate-ccw", this.tr("newConversation"), () => this.resetConversation());
+
+    // In-chat search bar (hidden by default).
+    this.searchRow = root.createDiv({ cls: "agent-chat-search" });
+    this.searchRow.style.display = "none";
+    this.searchInput = this.searchRow.createEl("input", {
+      cls: "agent-chat-search-input",
+      attr: { placeholder: this.tr("searchPlaceholder"), type: "text" },
+    });
+    const prevBtn = this.searchRow.createEl("button", { cls: "agent-chat-icon-btn", attr: { "aria-label": "↑" } });
+    setIcon(prevBtn, "chevron-up");
+    prevBtn.addEventListener("click", () => this.gotoMatch(-1));
+    const nextBtn = this.searchRow.createEl("button", { cls: "agent-chat-icon-btn", attr: { "aria-label": "↓" } });
+    setIcon(nextBtn, "chevron-down");
+    nextBtn.addEventListener("click", () => this.gotoMatch(1));
+    this.searchCountEl = this.searchRow.createSpan({ cls: "agent-chat-search-count" });
+    const closeBtn = this.searchRow.createEl("button", { cls: "agent-chat-icon-btn", attr: { "aria-label": "×" } });
+    setIcon(closeBtn, "x");
+    closeBtn.addEventListener("click", () => this.toggleSearch(false));
+    this.searchInput.addEventListener("input", () => this.runSearch());
+    this.searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); this.gotoMatch(e.shiftKey ? -1 : 1); }
+      if (e.key === "Escape") this.toggleSearch(false);
+    });
 
     this.messagesEl = root.createDiv({ cls: "agent-chat-messages" });
 
@@ -198,13 +243,14 @@ export class AgentChatView extends ItemView {
   /** Re-render bubbles from a loaded history. */
   private renderHistory(): void {
     this.messagesEl.empty();
+    this.bubbles = [];
     for (const m of this.history) {
       if (m.role === "user" && m.content) {
         // Strip the injected referenced-files block for display.
         const display = m.content.split("\n\n<referenced-files>")[0];
-        this.addBubble("agent-msg-user", display);
+        this.addBubble("agent-msg-user", display, { copyable: true, ts: m.ts });
       } else if (m.role === "assistant" && m.content) {
-        this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true });
+        this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
       } else if (m.role === "tool") {
         const short = m.content && m.content.length > 200 ? m.content.slice(0, 200) + "…" : m.content ?? "";
         this.addBubble("agent-msg-tool-result", `↳ ${m.name}: ${short}`);
@@ -232,6 +278,11 @@ export class AgentChatView extends ItemView {
     this.sessionId = undefined;
     this.refreshSessionPicker();
     this.messagesEl.empty();
+    this.bubbles = [];
+    this.searchMatches = [];
+    this.searchIdx = -1;
+    if (this.searchInput) this.searchInput.value = "";
+    if (this.searchCountEl) this.searchCountEl.setText("");
     this.addBubble("agent-msg-assistant", this.tr("contextCleared"));
     this.updateUsage();
   }
@@ -239,7 +290,11 @@ export class AgentChatView extends ItemView {
   /** Append a bubble. If `markdown` is true, renders text with Obsidian's
    * MarkdownRenderer (nice for AI answers); otherwise plain text.
    * Assistant messages get a bot avatar and a copy button. */
-  private addBubble(cls: string, text: string, opts?: { markdown?: boolean; copyable?: boolean }): HTMLElement {
+  private addBubble(
+    cls: string,
+    text: string,
+    opts?: { markdown?: boolean; copyable?: boolean; ts?: number }
+  ): HTMLElement {
     const el = this.messagesEl.createDiv({ cls: `agent-msg ${cls}` });
 
     // Bot avatar for assistant messages.
@@ -251,7 +306,7 @@ export class AgentChatView extends ItemView {
     const content = el.createDiv({ cls: "agent-msg-content" });
 
     if (opts?.copyable) {
-      const copyBtn = el.createEl("button", { cls: "agent-copy-btn", attr: { "aria-label": "copy" } });
+      const copyBtn = el.createEl("button", { cls: "agent-copy-btn", attr: { "aria-label": this.tr("copy") } });
       setIcon(copyBtn, "copy");
       copyBtn.addEventListener("click", () => {
         void navigator.clipboard.writeText(text);
@@ -263,13 +318,44 @@ export class AgentChatView extends ItemView {
 
     if (opts?.markdown) {
       MarkdownRenderer.render(this.app, text, content, "", this);
+      this.addCodeCopyButtons(content);
     } else {
       content.createSpan({ text });
     }
+
+    // Timestamp.
+    if (opts?.ts) {
+      const time = content.createSpan({
+        cls: "agent-msg-time",
+        text: new Date(opts.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
+      content.addClass("has-time");
+    }
+
+    // Track for in-chat search.
+    this.bubbles.push({ el, text });
+
     if (this.plugin.settings.autoScroll !== false) {
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     }
     return el;
+  }
+
+  /** Add a copy button to every rendered <pre> code block. */
+  private addCodeCopyButtons(container: HTMLElement): void {
+    const pres = container.querySelectorAll("pre");
+    pres.forEach((pre) => {
+      pre.addClass("agent-codeblock");
+      const btn = pre.createEl("button", { cls: "agent-code-copy", attr: { "aria-label": this.tr("copy") } });
+      setIcon(btn, "copy");
+      btn.addEventListener("click", () => {
+        const code = pre.querySelector("code")?.textContent ?? pre.textContent ?? "";
+        void navigator.clipboard.writeText(code.trim());
+        setIcon(btn, "check");
+        btn.addClass("copied");
+        window.setTimeout(() => { setIcon(btn, "copy"); btn.removeClass("copied"); }, 1500);
+      });
+    });
   }
 
   /** Auto-grow the textarea with content up to its max-height. */
@@ -308,6 +394,105 @@ export class AgentChatView extends ItemView {
     });
 
     return { el, body, setOpen };
+  }
+
+  // ---------- In-chat search ----------
+
+  private toggleSearch(force?: boolean): void {
+    if (!this.searchRow) return;
+    const show = force ?? this.searchRow.style.display === "none";
+    this.searchRow.style.display = show ? "flex" : "none";
+    if (show) this.searchInput?.focus();
+    else this.clearSearch();
+  }
+
+  private clearSearch(): void {
+    this.searchMatches = [];
+    this.searchIdx = -1;
+    this.bubbles.forEach((b) => b.el.removeClass("is-search-match"));
+    if (this.searchCountEl) this.searchCountEl.setText("");
+  }
+
+  private runSearch(): void {
+    const q = (this.searchInput?.value ?? "").trim().toLowerCase();
+    // Reset previous highlights.
+    this.searchMatches = [];
+    this.searchIdx = -1;
+    this.bubbles.forEach((b) => b.el.removeClass("is-search-match"));
+    if (!q) {
+      if (this.searchCountEl) this.searchCountEl.setText("");
+      return;
+    }
+    this.searchMatches = this.bubbles
+      .filter((b) => b.text.toLowerCase().includes(q))
+      .map((b) => b.el);
+    if (this.searchCountEl) {
+      this.searchCountEl.setText(
+        this.searchMatches.length > 0
+          ? this.tr("searchMatches", { n: this.searchMatches.length })
+          : this.tr("searchNone")
+      );
+    }
+    if (this.searchMatches.length > 0) this.gotoMatch(0, true);
+  }
+
+  private gotoMatch(delta: number, forceFirst = false): void {
+    if (this.searchMatches.length === 0) return;
+    if (forceFirst) this.searchIdx = 0;
+    else this.searchIdx = (this.searchIdx + delta + this.searchMatches.length) % this.searchMatches.length;
+    const el = this.searchMatches[this.searchIdx];
+    this.searchMatches.forEach((m, i) => m.toggleClass("is-search-match", i === this.searchIdx));
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  // ---------- Export / clear ----------
+
+  /** Export the current conversation to a Markdown file in the vault root. */
+  private async exportSession(): Promise<void> {
+    const history = this.history;
+    const hasContent = history.some((m) => m.role !== "tool" && m.content);
+    if (!hasContent) {
+      new Notice(this.tr("noMessages"));
+      return;
+    }
+
+    const lines: string[] = [`# ${this.tr("exportTitle")}`, ""];
+    for (const m of history) {
+      if (m.role === "user" && m.content) {
+        const display = m.content.split("\n\n<referenced-files>")[0];
+        lines.push(`## 👤 ${this.tr("userLabel")}`, "", display, "");
+      } else if (m.role === "assistant" && m.content) {
+        lines.push(`## 🤖 ${this.tr("assistantLabel")}`, "", m.content, "");
+      }
+    }
+
+    const title = this.sessionId ? (this.store.get(this.sessionId)?.title ?? "session") : "session";
+    const safeTitle = title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+    const fname = `Cagent-${safeTitle}-${stamp}.md`;
+
+    try {
+      await this.app.vault.create(fname, lines.join("\n"));
+      new Notice(this.tr("exportDone"));
+    } catch (e) {
+      new Notice(`${this.tr("exportFailed")}${(e as Error).message}`);
+    }
+  }
+
+  /** Clear the current conversation (with confirmation) and delete its session. */
+  private clearCurrentSession(): void {
+    if (this.busy) return;
+    new ConfirmModal(
+      this.app,
+      this.tr("clearConfirmTitle"),
+      this.tr("clearConfirmMsg"),
+      this.tr("clearCurrent"),
+      () => {
+        const id = this.sessionId;
+        this.resetConversation();
+        if (id) void this.store.delete(id);
+      }
+    ).open();
   }
 
   // ---------- @ file references ----------
@@ -468,7 +653,8 @@ export class AgentChatView extends ItemView {
     this.sendBtn.setAttr("aria-label", this.tr("stop"));
     this.inputEl.value = "";
     this.closeSuggestions();
-    this.addBubble("agent-msg-user", text, { copyable: true });
+    const sentAt = Date.now();
+    this.addBubble("agent-msg-user", text, { copyable: true, ts: sentAt });
     const payload = await this.buildPayload(text);
 
     // Refresh agent in case settings changed.
@@ -527,10 +713,17 @@ export class AgentChatView extends ItemView {
         }
       });
       if (!lastAssistant) renderLive(this.tr("noTextAnswer"));
+      // Stamp timestamps on the newest messages if missing (persisted history).
+      for (let i = this.history.length - 1; i >= 0; i--) {
+        const m = this.history[i];
+        if (m.ts !== undefined) break;
+        if (m.role === "user" || m.role === "assistant") m.ts = sentAt;
+      }
       // Convert the live bubble into a copyable static bubble.
       if (lastAssistant) {
         liveEl.remove();
-        this.addBubble("agent-msg-assistant", lastAssistant, { markdown: true, copyable: true });
+        const lastTs = this.history.length > 0 ? this.history[this.history.length - 1].ts : sentAt;
+        this.addBubble("agent-msg-assistant", lastAssistant, { markdown: true, copyable: true, ts: lastTs });
       }
       if (this.plugin.settings.autoScroll !== false) {
         this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
