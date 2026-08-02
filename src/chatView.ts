@@ -670,10 +670,10 @@ export class AgentChatView extends ItemView {
     });
   }
 
-  /** Recognize all pending images (background) and return per-image text. */
-  private async recognizePending(): Promise<string[]> {
+  /** Recognize the given images (background) and return per-image text. */
+  private async recognizePending(images: Array<{ data: string; name: string }>): Promise<string[]> {
     const { visionEnabled, visionBaseUrl, visionApiKey, visionModel } = this.plugin.settings;
-    if (this.pendingImages.length === 0) return [];
+    if (images.length === 0) return [];
     if (!visionEnabled) {
       new Notice(this.tr("visionNotEnabled"));
       return [];
@@ -683,7 +683,7 @@ export class AgentChatView extends ItemView {
       return [];
     }
     const out: string[] = [];
-    for (const img of this.pendingImages) {
+    for (const img of images) {
       try {
         const text = await visionDescribe({
           baseUrl: visionBaseUrl,
@@ -723,7 +723,7 @@ export class AgentChatView extends ItemView {
     this.renderPreview();
 
     // Recognize attached images in the background, then combine with the text.
-    const recognized = await this.recognizePending();
+    const recognized = await this.recognizePending(sentImages);
     const recogBlock = recognized
       .filter((r) => r && r.trim().length > 0)
       .map((r) => `[图片识别内容]\n${r.trim()}`)
