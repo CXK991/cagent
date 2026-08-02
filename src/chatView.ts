@@ -48,6 +48,10 @@ export class AgentChatView extends ItemView {
   private searchMatches: HTMLElement[] = [];
   private searchIdx = -1;
 
+  // Pending image attachments (sent as message bubbles, not pasted text).
+  private pendingImages: Array<{ data: string; name: string }> = [];
+  private previewRow?: HTMLElement;
+
   constructor(leaf: WorkspaceLeaf, private plugin: AgentPlugin) {
     super(leaf);
     this.agent = new ObsidianAgent(this.app, plugin.settings, plugin.consent, plugin.undo);
@@ -119,6 +123,9 @@ export class AgentChatView extends ItemView {
 
     this.messagesEl = root.createDiv({ cls: "agent-chat-messages" });
 
+    // Pending-image preview row (thumbnails, removable).
+    this.previewRow = root.createDiv({ cls: "agent-preview-row" });
+
     const inputRow = root.createDiv({ cls: "agent-chat-input-row" });
     this.inputEl = inputRow.createEl("textarea", {
       cls: "agent-chat-input",
@@ -145,7 +152,7 @@ export class AgentChatView extends ItemView {
     });
     this.imageInput.addEventListener("change", () => {
       const file = this.imageInput?.files?.[0];
-      if (file) void this.handleImage(file);
+      if (file) void this.addPendingImage(file);
     });
 
     this.sendBtn = inputRow.createEl("button", { cls: "agent-chat-send" });
@@ -245,10 +252,15 @@ export class AgentChatView extends ItemView {
     this.messagesEl.empty();
     this.bubbles = [];
     for (const m of this.history) {
-      if (m.role === "user" && m.content) {
+      if (m.role === "user" && (m.content || m.images)) {
         // Strip the injected referenced-files block for display.
-        const display = m.content.split("\n\n<referenced-files>")[0];
-        this.addBubble("agent-msg-user", display, { copyable: true, ts: m.ts });
+        const display = m.content?.split("\n\n<referenced-files>")[0] ?? "";
+        const shownText = m.prompt && m.prompt.trim().length > 0 ? m.prompt : display;
+        if (m.images && m.images.length > 0) {
+          this.addUserBubble(m.images.map((d) => ({ data: d, name: "image" })), shownText, m.ts ?? Date.now());
+        } else {
+          this.addBubble("agent-msg-user", shownText, { copyable: true, ts: m.ts });
+        }
       } else if (m.role === "assistant" && m.content) {
         this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
       } else if (m.role === "tool") {
@@ -335,6 +347,27 @@ export class AgentChatView extends ItemView {
     // Track for in-chat search.
     this.bubbles.push({ el, text });
 
+    if (this.plugin.settings.autoScroll !== false) {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    }
+    return el;
+  }
+
+  /** User message bubble: optional image thumbnails + original text. */
+  private addUserBubble(images: Array<{ data: string; name: string }>, text: string, ts: number): HTMLElement {
+    const el = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-user" });
+    const content = el.createDiv({ cls: "agent-msg-content" });
+    for (const img of images) {
+      const thumb = content.createEl("img", { cls: "agent-msg-img", attr: { alt: img.name } });
+      thumb.src = `data:image/jpeg;base64,${img.data}`;
+    }
+    if (text) content.createSpan({ text });
+    const time = content.createSpan({
+      cls: "agent-msg-time",
+      text: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    });
+    content.addClass("has-time");
+    this.bubbles.push({ el, text });
     if (this.plugin.settings.autoScroll !== false) {
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     }
@@ -605,43 +638,72 @@ export class AgentChatView extends ItemView {
     });
   }
 
-  /** Recognize an image with the vision model and insert the text into the input. */
-  private async handleImage(file: File): Promise<void> {
+  /** Queue an image for sending (compressed, shown as a thumbnail preview). */
+  private async addPendingImage(file: File): Promise<void> {
+    if (this.imageInput) this.imageInput.value = "";
+    try {
+      const data = await this.compressImage(file);
+      this.pendingImages.push({ data, name: file.name || "image" });
+      this.renderPreview();
+    } catch (e) {
+      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+    }
+  }
+
+  private removePendingImage(idx: number): void {
+    this.pendingImages.splice(idx, 1);
+    this.renderPreview();
+  }
+
+  private renderPreview(): void {
+    const row = this.previewRow;
+    if (!row) return;
+    row.empty();
+    if (this.pendingImages.length === 0) return;
+    this.pendingImages.forEach((img, i) => {
+      const item = row.createDiv({ cls: "agent-preview-item" });
+      const thumb = item.createEl("img", { cls: "agent-preview-thumb" });
+      thumb.src = `data:image/jpeg;base64,${img.data}`;
+      const del = item.createEl("button", { cls: "agent-preview-del", attr: { "aria-label": this.tr("removeImage") } });
+      setIcon(del, "x");
+      del.addEventListener("click", () => this.removePendingImage(i));
+    });
+  }
+
+  /** Recognize all pending images (background) and return per-image text. */
+  private async recognizePending(): Promise<string[]> {
     const { visionEnabled, visionBaseUrl, visionApiKey, visionModel } = this.plugin.settings;
+    if (this.pendingImages.length === 0) return [];
     if (!visionEnabled) {
       new Notice(this.tr("visionNotEnabled"));
-      return;
+      return [];
     }
     if (!visionApiKey) {
       new Notice(this.tr("visionNoKey"));
-      return;
+      return [];
     }
-
-    const statusEl = this.addBubble("agent-msg-tool-result", this.tr("recognizing"));
-    try {
-      const base64 = await this.compressImage(file);
-      const text = await visionDescribe({
-        baseUrl: visionBaseUrl,
-        apiKey: visionApiKey,
-        model: visionModel,
-        images: [base64],
-      });
-      statusEl.firstElementChild?.setText(`${this.tr("recognized")}${file.name || "image"}):`);
-      const current = this.inputEl.value;
-      const insert = current.length > 0 ? `\n\n[图片识别结果]\n${text}` : `[图片识别结果]\n${text}`;
-      this.inputEl.value = current + insert;
-      this.inputEl.focus();
-    } catch (e) {
-      statusEl.firstElementChild?.setText(`${this.tr("recognitionFailed")}${(e as Error).message}`);
-      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
-    } finally {
-      if (this.imageInput) this.imageInput.value = "";
+    const out: string[] = [];
+    for (const img of this.pendingImages) {
+      try {
+        const text = await visionDescribe({
+          baseUrl: visionBaseUrl,
+          apiKey: visionApiKey,
+          model: visionModel,
+          images: [img.data],
+        });
+        out.push(text);
+      } catch (e) {
+        new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+        out.push("");
+      }
     }
+    return out;
   }
 
   private async send(): Promise<void> {
     const text = this.inputEl.value.trim();
-    if (!text || this.busy) return;
+    const hasImages = this.pendingImages.length > 0;
+    if ((!text && !hasImages) || this.busy) return;
     if (!this.plugin.settings.apiKey) {
       new Notice(this.tr("noApiKey"));
       return;
@@ -653,9 +715,34 @@ export class AgentChatView extends ItemView {
     this.sendBtn.setAttr("aria-label", this.tr("stop"));
     this.inputEl.value = "";
     this.closeSuggestions();
+
     const sentAt = Date.now();
-    this.addBubble("agent-msg-user", text, { copyable: true, ts: sentAt });
-    const payload = await this.buildPayload(text);
+    const sentImages = this.pendingImages.slice();
+    const promptText = text;
+    this.pendingImages = [];
+    this.renderPreview();
+
+    // Recognize attached images in the background, then combine with the text.
+    const recognized = await this.recognizePending();
+    const recogBlock = recognized
+      .filter((r) => r && r.trim().length > 0)
+      .map((r) => `[图片识别内容]\n${r.trim()}`)
+      .join("\n\n");
+    const modelInput = [recogBlock, text].filter((p) => p && p.trim().length > 0).join("\n\n");
+
+    // User bubble shows thumbnails + the original text.
+    this.addUserBubble(sentImages, promptText, sentAt);
+
+    const payload = await this.buildPayload(modelInput);
+
+    // Persist this user message (recognition hidden from display, kept in content).
+    this.history.push({
+      role: "user",
+      content: modelInput,
+      prompt: promptText,
+      images: sentImages.map((i) => i.data),
+      ts: sentAt,
+    });
 
     // Refresh agent in case settings changed.
     this.agent = new ObsidianAgent(this.app, this.plugin.settings, this.plugin.consent, this.plugin.undo);

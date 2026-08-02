@@ -52,6 +52,7 @@ const zh = {
   recognized: "📷 已识别（",
   recognitionFailed: "📷 识别失败：",
   visionError: "Cagent 识图：",
+  removeImage: "移除图片",
 
   // Settings
   secGeneral: "通用",
@@ -171,6 +172,7 @@ const en: Record<Key, string> = {
   recognized: "📷 Recognized (",
   recognitionFailed: "📷 Recognition failed: ",
   visionError: "Cagent vision: ",
+  removeImage: "Remove image",
 
   secGeneral: "General",
   secTextModel: "Text model",

@@ -200,6 +200,55 @@
 
 /* ---------- Input area ---------- */
 
+/* Pending-image preview row above the input */
+.agent-preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.agent-preview-item {
+  position: relative;
+}
+
+.agent-preview-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.agent-preview-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 50%;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.agent-preview-del:hover {
+  color: var(--text-error);
+}
+
+/* Image thumbnails inside a user message bubble */
+.agent-msg-img {
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 4px;
+}
+
 .agent-chat-input-row {
   display: flex;
   gap: 6px;

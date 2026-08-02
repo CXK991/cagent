@@ -13,6 +13,9 @@ export interface ChatMessage {
   name?: string;
   /** Wall-clock timestamp (ms) used to display message times. */
   ts?: number;
+  /** User's original text (as typed), for display when images are attached.
+   * `content` then holds the full text sent to the model (incl. recognition). */
+  prompt?: string;
 }
 
 /** A recognized image embedded in a chat message as an OpenAI content part. */
