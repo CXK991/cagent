@@ -7,6 +7,8 @@ export interface AgentSettings {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Quick provider preset; "custom" = manual baseUrl/model. */
+  providerPreset: string;
   /** UI language. */
   language: Lang;
   /** Vision model used to recognize images before they reach the text model. */
@@ -14,6 +16,18 @@ export interface AgentSettings {
   visionBaseUrl: string;
   visionApiKey: string;
   visionModel: string;
+  /** Sampling temperature (0–2). */
+  temperature: number;
+  /** Max completion tokens. */
+  maxTokens: number;
+  /** Custom system prompt prepended to the default. Empty = default only. */
+  systemPromptOverride: string;
+  /** Whether the "thinking" panel is collapsed by default. */
+  thinkingCollapsed: boolean;
+  /** Whether tool-call activity is shown in chat. */
+  showToolCalls: boolean;
+  /** Auto-scroll to the newest message. */
+  autoScroll: boolean;
   maxIterations: number;
   unlimitedIterations: boolean;
   openMode: "sidebar" | "tab";
@@ -22,15 +36,36 @@ export interface AgentSettings {
   truncateMaxLines: number;
 }
 
+/** Quick provider presets: fill in baseUrl + a sensible default model. */
+export const PROVIDER_PRESETS: Array<{
+  id: string;
+  label: string;
+  baseUrl: string;
+  model: string;
+}> = [
+  { id: "custom", label: "Custom", baseUrl: "", model: "" },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  { id: "dashscope", label: "通义千问 (DashScope)", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  { id: "ollama", label: "Ollama (local)", baseUrl: "http://localhost:11434/v1", model: "llama3.1" },
+];
+
 export const DEFAULT_SETTINGS: AgentSettings = {
-  baseUrl: "https://api.openai.com/v1",
+  baseUrl: "",
   apiKey: "",
-  model: "gpt-4o-mini",
+  model: "",
+  providerPreset: "custom",
   language: "zh",
   visionEnabled: false,
   visionBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
   visionApiKey: "",
   visionModel: "qwen-vl-plus",
+  temperature: 0.7,
+  maxTokens: 4096,
+  systemPromptOverride: "",
+  thinkingCollapsed: true,
+  showToolCalls: true,
+  autoScroll: true,
   maxIterations: 10,
   unlimitedIterations: false,
   openMode: "sidebar",
@@ -51,6 +86,11 @@ export class AgentSettingTab extends PluginSettingTab {
   /** Translate a key in the currently selected UI language. */
   private tr(key: Key, vars?: Record<string, string | number>): string {
     return t(this.plugin.settings.language, key, vars);
+  }
+
+  /** Section heading (Copilot-style grouping). */
+  private section(containerEl: HTMLElement, title: string): void {
+    containerEl.createEl("h3", { cls: "cagent-section-title", text: title });
   }
 
   /** Model picker: dropdown populated from the endpoint's /models, with a
@@ -120,7 +160,9 @@ export class AgentSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    // ---- Language ----
+    // ---- General ----
+    this.section(containerEl, this.tr("secGeneral"));
+
     new Setting(containerEl)
       .setName(this.tr("language"))
       .setDesc(this.tr("languageDesc"))
@@ -134,6 +176,26 @@ export class AgentSettingTab extends PluginSettingTab {
       });
 
     // ---- Main (text) model ----
+    this.section(containerEl, this.tr("secTextModel"));
+
+    // Provider preset: quickly fill baseUrl + model.
+    new Setting(containerEl)
+      .setName(this.tr("provider"))
+      .setDesc(this.tr("providerDesc"))
+      .addDropdown((d) => {
+        for (const p of PROVIDER_PRESETS) d.addOption(p.id, p.label);
+        d.setValue(this.plugin.settings.providerPreset).onChange(async (v) => {
+          const preset = PROVIDER_PRESETS.find((p) => p.id === v);
+          if (preset) {
+            this.plugin.settings.providerPreset = preset.id;
+            this.plugin.settings.baseUrl = preset.baseUrl;
+            this.plugin.settings.model = preset.model;
+            await this.plugin.saveSettings();
+            this.display();
+          }
+        });
+      });
+
     new Setting(containerEl)
       .setName(this.tr("baseUrl"))
       .setDesc(this.tr("baseUrlDesc"))
@@ -157,7 +219,51 @@ export class AgentSettingTab extends PluginSettingTab {
 
     this.renderModelSetting(containerEl);
 
+    // Model parameters (temperature / max tokens).
+    const tempSetting = new Setting(containerEl)
+      .setName(this.tr("temperature"))
+      .setDesc(this.tr("temperatureDesc"))
+      .addSlider((s) => {
+        const valueEl = containerEl.createSpan({ cls: "agent-slider-value", text: this.plugin.settings.temperature.toFixed(1) });
+        s.setLimits(0, 200, 5)
+          .setValue(Math.round(this.plugin.settings.temperature * 100))
+          .onChange(async (v) => {
+            this.plugin.settings.temperature = v / 100;
+            valueEl.setText((v / 100).toFixed(1));
+            await this.plugin.saveSettings();
+          });
+        s.sliderEl.addClass("agent-slider");
+      });
+
+    new Setting(containerEl)
+      .setName(this.tr("maxTokens"))
+      .setDesc(this.tr("maxTokensDesc"))
+      .addSlider((s) => {
+        const valueEl = containerEl.createSpan({ cls: "agent-slider-value", text: String(this.plugin.settings.maxTokens) });
+        s.setLimits(256, 16384, 256)
+          .setValue(this.plugin.settings.maxTokens)
+          .onChange(async (v) => {
+            this.plugin.settings.maxTokens = v;
+            valueEl.setText(String(v));
+            await this.plugin.saveSettings();
+          });
+        s.sliderEl.addClass("agent-slider");
+      });
+
+    // Custom system prompt.
+    new Setting(containerEl)
+      .setName(this.tr("systemPrompt"))
+      .setDesc(this.tr("systemPromptDesc"))
+      .addTextArea((ta) => {
+        ta.setValue(this.plugin.settings.systemPromptOverride).onChange(async (v) => {
+          this.plugin.settings.systemPromptOverride = v;
+          await this.plugin.saveSettings();
+        });
+        ta.inputEl.rows = 4;
+      });
+
     // ---- Vision model (image recognition) ----
+    this.section(containerEl, this.tr("secVision"));
     new Setting(containerEl)
       .setName(this.tr("vision"))
       .setDesc(this.tr("visionDesc"))
@@ -279,6 +385,53 @@ export class AgentSettingTab extends PluginSettingTab {
         s.sliderEl.addClass("agent-slider");
       });
     linesSetting.setDisabled(!this.plugin.settings.truncateEnabled);
+
+    // ---- Chat display ----
+    this.section(containerEl, this.tr("secChat"));
+
+    new Setting(containerEl)
+      .setName(this.tr("thinkingCollapsed"))
+      .setDesc(this.tr("thinkingCollapsedDesc"))
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.thinkingCollapsed).onChange(async (v) => {
+          this.plugin.settings.thinkingCollapsed = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("showToolCalls"))
+      .setDesc(this.tr("showToolCallsDesc"))
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.showToolCalls).onChange(async (v) => {
+          this.plugin.settings.showToolCalls = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("autoScroll"))
+      .setDesc(this.tr("autoScrollDesc"))
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.autoScroll).onChange(async (v) => {
+          this.plugin.settings.autoScroll = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    // ---- History ----
+    this.section(containerEl, this.tr("secHistory"));
+    new Setting(containerEl)
+      .setName(this.tr("clearHistory"))
+      .setDesc(this.tr("clearHistoryDesc"))
+      .addButton((b) =>
+        b.setButtonText(this.tr("clearHistory"))
+          .setWarning()
+          .onClick(async () => {
+            await this.plugin.store.clearAll();
+            new Notice(this.tr("historyCleared"));
+          })
+      );
 
     // Auto-fetch the model list once when the tab opens (if possible).
     if (!this.autoFetched && this.fetchedModels.length === 0 && this.plugin.settings.baseUrl) {

@@ -40,7 +40,7 @@ export class AgentChatView extends ItemView {
   constructor(leaf: WorkspaceLeaf, private plugin: AgentPlugin) {
     super(leaf);
     this.agent = new ObsidianAgent(this.app, plugin.settings, plugin.consent, plugin.undo);
-    this.store = new SessionStore(this.app);
+    this.store = plugin.store;
   }
 
   getViewType(): string { return VIEW_TYPE_AGENT_CHAT; }
@@ -238,9 +238,17 @@ export class AgentChatView extends ItemView {
 
   /** Append a bubble. If `markdown` is true, renders text with Obsidian's
    * MarkdownRenderer (nice for AI answers); otherwise plain text.
-   * Assistant messages also get a copy button. */
+   * Assistant messages get a bot avatar and a copy button. */
   private addBubble(cls: string, text: string, opts?: { markdown?: boolean; copyable?: boolean }): HTMLElement {
     const el = this.messagesEl.createDiv({ cls: `agent-msg ${cls}` });
+
+    // Bot avatar for assistant messages.
+    if (cls.includes("assistant")) {
+      const avatar = el.createDiv({ cls: "agent-msg-avatar" });
+      setIcon(avatar, "bot");
+    }
+
+    const content = el.createDiv({ cls: "agent-msg-content" });
 
     if (opts?.copyable) {
       const copyBtn = el.createEl("button", { cls: "agent-copy-btn", attr: { "aria-label": "copy" } });
@@ -254,11 +262,13 @@ export class AgentChatView extends ItemView {
     }
 
     if (opts?.markdown) {
-      MarkdownRenderer.render(this.app, text, el, "", this);
+      MarkdownRenderer.render(this.app, text, content, "", this);
     } else {
-      el.createSpan({ text });
+      content.createSpan({ text });
     }
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    if (this.plugin.settings.autoScroll !== false) {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    }
     return el;
   }
 
@@ -266,6 +276,38 @@ export class AgentChatView extends ItemView {
   private autoGrowInput(): void {
     this.inputEl.style.height = "auto";
     this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 120) + "px";
+  }
+
+  /** Create a collapsible panel (for thinking / tool calls) with a header. */
+  private createPanel(
+    title: string,
+    startCollapsed: boolean,
+    onToggle?: (open: boolean) => void
+  ): { el: HTMLElement; body: HTMLElement; setOpen: (open: boolean) => void } {
+    const el = this.messagesEl.createDiv({ cls: "agent-panel" });
+    const header = el.createDiv({ cls: "agent-panel-header" });
+    const chevron = header.createDiv({ cls: "agent-panel-chevron" });
+    setIcon(chevron, "chevron-right");
+    header.createSpan({ cls: "agent-panel-title", text: title });
+    let open = !startCollapsed;
+    const body = el.createDiv({ cls: "agent-panel-body" });
+
+    const apply = (): void => {
+      el.toggleClass("is-open", open);
+      body.style.display = open ? "block" : "none";
+      chevron.empty();
+      setIcon(chevron, open ? "chevron-down" : "chevron-right");
+    };
+    const setOpen = (v: boolean): void => { open = v; apply(); };
+    apply();
+
+    header.addEventListener("click", () => {
+      setOpen(!open);
+      onToggle?.(open);
+      if (open) this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    });
+
+    return { el, body, setOpen };
   }
 
   // ---------- @ file references ----------
@@ -434,29 +476,54 @@ export class AgentChatView extends ItemView {
 
     // Live assistant bubble: re-renders markdown as text streams in.
     const liveEl = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-assistant agent-msg-live" });
-    const liveContent = liveEl.createDiv({ cls: "agent-msg-body" });
+    const liveAvatar = liveEl.createDiv({ cls: "agent-msg-avatar" });
+    setIcon(liveAvatar, "bot");
+    const liveContent = liveEl.createDiv({ cls: "agent-msg-content" });
 
     const renderLive = (md: string): void => {
       liveContent.empty();
       MarkdownRenderer.render(this.app, md, liveContent, "", this);
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      if (this.plugin.settings.autoScroll !== false) {
+        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      }
     };
     renderLive("…");
 
     try {
       let lastAssistant = "";
+      // Collapsible panels for thinking and tool calls (single-use per turn).
+      let thinkingPanel: { body: HTMLElement } | null = null;
+      let toolPanel: { body: HTMLElement } | null = null;
+      const showTools = this.plugin.settings.showToolCalls !== false;
+      const collapsedThinking = this.plugin.settings.thinkingCollapsed !== false;
+
       this.history = await this.agent.run(this.history, payload, (e) => {
         if (e.type === "assistant") {
           lastAssistant = e.content;
           renderLive(e.content);
         } else if (e.type === "thinking") {
-          const short = e.content.length > 500 ? e.content.slice(0, 500) + "…" : e.content;
-          this.addBubble("agent-msg-thinking", `🧠 ${short}`);
+          if (!thinkingPanel) {
+            thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
+          }
+          thinkingPanel.body.empty();
+          thinkingPanel.body.createSpan({ text: e.content });
         } else if (e.type === "tool_call") {
-          this.addBubble("agent-msg-tool", `⚙ ${e.name}(${e.content})`);
+          if (!showTools) return;
+          if (!toolPanel) {
+            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true);
+          }
+          const line = toolPanel.body.createDiv({ cls: "agent-panel-tool" });
+          const name = line.createSpan({ cls: "agent-panel-tool-name" });
+          name.setText(`⚙ ${e.name}`);
+          line.createSpan({ cls: "agent-panel-tool-args", text: e.content });
         } else if (e.type === "tool_result") {
+          if (!showTools) return;
+          if (!toolPanel) {
+            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true);
+          }
           const short = e.content.length > 300 ? e.content.slice(0, 300) + "…" : e.content;
-          this.addBubble("agent-msg-tool-result", `↳ ${short}`);
+          const res = toolPanel.body.createDiv({ cls: "agent-panel-tool-result" });
+          res.createSpan({ text: `↳ ${short}` });
         }
       });
       if (!lastAssistant) renderLive(this.tr("noTextAnswer"));
@@ -465,7 +532,9 @@ export class AgentChatView extends ItemView {
         liveEl.remove();
         this.addBubble("agent-msg-assistant", lastAssistant, { markdown: true, copyable: true });
       }
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      if (this.plugin.settings.autoScroll !== false) {
+        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      }
       // Persist the conversation.
       this.sessionId = await this.store.save(this.history, this.sessionId);
       this.refreshSessionPicker();

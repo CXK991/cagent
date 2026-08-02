@@ -40,6 +40,10 @@ export interface ChatCompletionOptions {
   model: string;
   messages: ChatMessage[];
   tools?: ToolDefinition[];
+  /** Sampling temperature (0–2). Omit for provider default. */
+  temperature?: number;
+  /** Max completion tokens. Omit for provider default. */
+  maxTokens?: number;
 }
 
 export interface ChatCompletionResult {
@@ -109,6 +113,8 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
     body.tools = opts.tools;
     body.tool_choice = "auto";
   }
+  if (opts.temperature !== undefined) body.temperature = opts.temperature;
+  if (opts.maxTokens !== undefined) body.max_tokens = opts.maxTokens;
 
   let res;
   try {

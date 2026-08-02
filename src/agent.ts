@@ -40,13 +40,18 @@ Guidelines:
 - Vault-relative paths always end with .md for notes.
 - Your workspace is the AGENT/ folder: AGENT/memory.md is your long-term memory (always injected below; persist important facts with update_memory), AGENT/skills/ holds reusable skill files — when a listed skill matches the task, call read_skill to load and follow it.`;
 
-export async function buildSystemPrompt(app: App): Promise<string> {
+export async function buildSystemPrompt(app: App, override?: string): Promise<string> {
   await ensureAgentWorkspace(app);
   const [memory, skills] = await Promise.all([loadMemory(app), listSkills(app)]);
   const skillLines = skills.length
     ? skills.map((s) => `- ${s.name}: ${s.description}`).join("\n")
     : "(no skills yet — .md files in AGENT/skills/ become skills)";
-  return `${BASE_PROMPT}
+  // A custom system prompt (set in the plugin settings) prepends the default,
+  // so the user's instructions take precedence while memory/skills are kept.
+  const base = override && override.trim().length > 0
+    ? `${override.trim()}\n\n${BASE_PROMPT}`
+    : BASE_PROMPT;
+  return `${base}
 
 <Long-term memory (AGENT/memory.md)>
 ${memory.trim() || "(empty)"}
@@ -90,7 +95,7 @@ export class ObsidianAgent {
     onEvent: AgentEventHandler
   ): Promise<ChatMessage[]> {
     const messages: ChatMessage[] = [
-      { role: "system", content: await buildSystemPrompt(this.app) },
+      { role: "system", content: await buildSystemPrompt(this.app, this.settings.systemPromptOverride) },
       ...history,
       { role: "user", content: userInput },
     ];
@@ -118,6 +123,8 @@ export class ObsidianAgent {
         model: this.settings.model,
         messages,
         tools: this.tools.map((t) => t.definition),
+        temperature: this.settings.temperature,
+        maxTokens: this.settings.maxTokens,
       });
 
       const msg = result.message;

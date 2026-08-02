@@ -4,6 +4,7 @@ import { AgentChatView, VIEW_TYPE_AGENT_CHAT } from "./chatView";
 import { ensureAgentWorkspace } from "./memory";
 import { ConsentManager } from "./consent";
 import { UndoManager } from "./undo";
+import { SessionStore } from "./sessions";
 import { t } from "./i18n";
 
 interface SplitNode {
@@ -15,11 +16,13 @@ export default class AgentPlugin extends Plugin {
   settings!: AgentSettings;
   consent!: ConsentManager;
   undo!: UndoManager;
+  store!: SessionStore;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.consent = new ConsentManager(this.app, () => this.settings.requireConsent);
     this.undo = new UndoManager();
+    this.store = new SessionStore(this.app);
 
     // Bootstrap the AGENT/ workspace (memory.md + skills/) in the vault root.
     this.app.workspace.onLayoutReady(() => {

@@ -11,7 +11,7 @@ export interface ChatSession {
   messages: ChatMessage[];
 }
 
-const SESSIONS_PATH = ".obsidian/plugins/agent/sessions.json";
+const SESSIONS_PATH = ".obsidian/plugins/cagent/sessions.json";
 const MAX_SESSIONS = 20;
 const MAX_MESSAGES = 200;
 
@@ -70,6 +70,16 @@ export class SessionStore {
       await this.app.vault.adapter.write(SESSIONS_PATH, JSON.stringify(this.sessions));
     } catch (e) {
       console.error("[agent] failed to persist sessions", e);
+    }
+  }
+
+  /** Delete all stored conversations. */
+  async clearAll(): Promise<void> {
+    this.sessions = [];
+    try {
+      await this.app.vault.adapter.remove(SESSIONS_PATH);
+    } catch {
+      // File may not exist — that's fine.
     }
   }
 }
