@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { FileSystemAdapter, ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, normalizePath, setIcon } from "obsidian";
 import { ObsidianAgent } from "./agent";
 import { truncateText } from "./tools";
 import { SessionStore } from "./sessions";
@@ -25,6 +25,7 @@ export class AgentChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private imageInput?: HTMLInputElement;
+  private cameraInput?: HTMLInputElement;
   private busy = false;
 
   // @ file-reference suggestions
@@ -132,7 +133,29 @@ export class AgentChatView extends ItemView {
       attr: { placeholder: this.tr("chatPlaceholder") },
     });
 
-    // Image (vision) button — always visible. If the vision model isn't
+    // Camera (take photo) button — captures with the back camera on mobile.
+    const camBtn = inputRow.createEl("button", {
+      cls: "agent-chat-img",
+      attr: { "aria-label": this.tr("takePhoto") },
+    });
+    setIcon(camBtn, "camera");
+    camBtn.addEventListener("click", () => {
+      if (!this.plugin.settings.visionEnabled) {
+        new Notice(this.tr("visionNotEnabled"));
+        return;
+      }
+      this.cameraInput?.click();
+    });
+    this.cameraInput = inputRow.createEl("input", {
+      type: "file",
+      attr: { accept: "image/*", capture: "environment", style: "display: none" },
+    });
+    this.cameraInput.addEventListener("change", () => {
+      const file = this.cameraInput?.files?.[0];
+      if (file) void this.addPendingImage(file);
+    });
+
+    // Image (photo library) button — always visible. If the vision model isn't
     // configured, clicking it shows a hint instead of opening the picker.
     const imgBtn = inputRow.createEl("button", {
       cls: "agent-chat-img",
@@ -353,13 +376,38 @@ export class AgentChatView extends ItemView {
     return el;
   }
 
+  /** Write a base64 image to the vault as a temp file and open it in the
+   * built-in image viewer (zoomable, scrollable). */
+  private async openImageViewer(data: string, name: string): Promise<void> {
+    try {
+      const adapter = this.app.vault.adapter;
+      if (!(adapter instanceof FileSystemAdapter)) {
+        new Notice(this.tr("visionNotEnabled"));
+        return;
+      }
+      const vaultPath = normalizePath(`.trash/cagent-view-${Date.now()}.jpg`);
+      const buf = Buffer.from(data, "base64");
+      // Ensure the folder exists.
+      await adapter.mkdir(normalizePath(".trash"));
+      await adapter.writeBinary(vaultPath, buf);
+      const tf = this.app.vault.getAbstractFileByPath(vaultPath);
+      if (tf instanceof TFile) {
+        const leaf = this.app.workspace.getLeaf("tab");
+        await leaf.openFile(tf);
+      }
+    } catch (e) {
+      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+    }
+  }
+
   /** User message bubble: optional image thumbnails + original text. */
   private addUserBubble(images: Array<{ data: string; name: string }>, text: string, ts: number): HTMLElement {
     const el = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-user" });
     const content = el.createDiv({ cls: "agent-msg-content" });
     for (const img of images) {
-      const thumb = content.createEl("img", { cls: "agent-msg-img", attr: { alt: img.name } });
+      const thumb = content.createEl("img", { cls: "agent-msg-img", attr: { alt: img.name, title: this.tr("viewImage") } });
       thumb.src = `data:image/jpeg;base64,${img.data}`;
+      thumb.addEventListener("click", () => void this.openImageViewer(img.data, img.name));
     }
     if (text) content.createSpan({ text });
     const time = content.createSpan({
