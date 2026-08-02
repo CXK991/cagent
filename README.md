@@ -27,7 +27,17 @@
 
 ## 安装
 
-### 手动安装
+> Cagent 正在提交 Obsidian 官方社区插件库审核。审核通过前，推荐用 **BRAT** 安装（从 GitHub Release 直接拉取，支持自动更新）。
+
+### 方式一：BRAT（推荐，审核通过前的测试方式）
+
+1. Obsidian **设置 → 第三方插件 → 社区插件**，搜索安装 **BRAT**（作者 TfTHacker）并启用。
+2. 运行命令 **`BRAT: Add a beta plugin for testing`**。
+3. 粘贴仓库地址：`https://github.com/CXK991/cagent`（不要带末尾 `/`）。
+4. 点 **Add Plugin**，等待安装完成，然后在已安装插件中启用 **Cagent**。
+5. 更新时运行 **`Check for updates to all beta plugins and UPDATE`**。
+
+### 方式二：手动安装
 
 1. 下载 `main.js`、`manifest.json`、`styles.css` 三个文件。
 2. 在你的 Vault 下创建目录 `.obsidian/plugins/cagent/`（**目录名必须是 `cagent`**）。
