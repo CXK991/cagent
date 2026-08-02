@@ -7,8 +7,6 @@ import { t, type Key } from "./i18n";
 import { SessionManagerModal, ConfirmModal } from "./sessionModal";
 import type AgentPlugin from "./main";
 
-/** Max image size sent to the vision API (bytes). */
-const MAX_IMAGE_BYTES = 1024 * 1024; // ~1 MB
 /** Longest side for the downscaled image. */
 const MAX_IMAGE_SIDE = 1280;
 
