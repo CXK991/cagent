@@ -1,0 +1,484 @@
+import { ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { ObsidianAgent } from "./agent";
+import { truncateText } from "./tools";
+import { SessionStore } from "./sessions";
+import { visionDescribe, type ChatMessage } from "./openai";
+import { t, type Key } from "./i18n";
+import type AgentPlugin from "./main";
+
+/** Max image size sent to the vision API (bytes). */
+const MAX_IMAGE_BYTES = 1024 * 1024; // ~1 MB
+/** Longest side for the downscaled image. */
+const MAX_IMAGE_SIDE = 1280;
+
+const MAX_FILE_REFS = 5;
+const MAX_SUGGESTIONS = 8;
+
+export const VIEW_TYPE_AGENT_CHAT = "agent-tools-chat";
+
+export class AgentChatView extends ItemView {
+  private agent: ObsidianAgent;
+  private history: ChatMessage[] = [];
+  private messagesEl!: HTMLElement;
+  private usageEl!: HTMLElement;
+  private inputEl!: HTMLTextAreaElement;
+  private sendBtn!: HTMLButtonElement;
+  private imageInput?: HTMLInputElement;
+  private busy = false;
+
+  // @ file-reference suggestions
+  private suggestEl?: HTMLElement;
+  private suggestFiles: TFile[] = [];
+  private suggestIdx = 0;
+  private suggestFrom = -1; // caret index of the active '@'
+
+  // Session persistence
+  private store: SessionStore;
+  private sessionId?: string;
+  private sessionSelect?: HTMLSelectElement;
+
+  constructor(leaf: WorkspaceLeaf, private plugin: AgentPlugin) {
+    super(leaf);
+    this.agent = new ObsidianAgent(this.app, plugin.settings, plugin.consent, plugin.undo);
+    this.store = new SessionStore(this.app);
+  }
+
+  getViewType(): string { return VIEW_TYPE_AGENT_CHAT; }
+  getDisplayText(): string { return t(this.plugin.settings.language, "chatTitle"); }
+  getIcon(): string { return "bot"; }
+
+  /** Translate a key in the current UI language. */
+  private tr(key: Key, vars?: Record<string, string | number>): string {
+    return t(this.plugin.settings.language, key, vars);
+  }
+
+  async onOpen(): Promise<void> {
+    const root = this.contentEl;
+    root.empty();
+    root.addClass("agent-chat-root");
+
+    // Header: session picker + context usage (left) + refresh action (right).
+    const header = root.createDiv({ cls: "agent-chat-header" });
+    this.sessionSelect = header.createEl("select", { cls: "agent-chat-sessions" });
+    this.sessionSelect.addEventListener("change", () => {
+      const id = this.sessionSelect?.value;
+      if (id && id !== this.sessionId) this.loadSession(id);
+    });
+    this.usageEl = header.createSpan({ cls: "agent-chat-usage", text: "context ≈ 0 tok" });
+    const refreshBtn = header.createEl("button", {
+      cls: "agent-chat-refresh",
+      attr: { "aria-label": this.tr("newConversation") },
+    });
+    setIcon(refreshBtn, "rotate-ccw");
+    refreshBtn.addEventListener("click", () => { this.resetConversation(); });
+
+    this.messagesEl = root.createDiv({ cls: "agent-chat-messages" });
+
+    const inputRow = root.createDiv({ cls: "agent-chat-input-row" });
+    this.inputEl = inputRow.createEl("textarea", {
+      cls: "agent-chat-input",
+      attr: { placeholder: this.tr("chatPlaceholder") },
+    });
+
+    // Image (vision) button — always visible. If the vision model isn't
+    // configured, clicking it shows a hint instead of opening the picker.
+    const imgBtn = inputRow.createEl("button", {
+      cls: "agent-chat-img",
+      attr: { "aria-label": this.tr("addImage") },
+    });
+    setIcon(imgBtn, "image");
+    imgBtn.addEventListener("click", () => {
+      if (!this.plugin.settings.visionEnabled) {
+        new Notice(this.tr("visionNotEnabled"));
+        return;
+      }
+      this.imageInput?.click();
+    });
+    this.imageInput = inputRow.createEl("input", {
+      type: "file",
+      attr: { accept: "image/*", style: "display: none" },
+    });
+    this.imageInput.addEventListener("change", () => {
+      const file = this.imageInput?.files?.[0];
+      if (file) void this.handleImage(file);
+    });
+
+    this.sendBtn = inputRow.createEl("button", { cls: "agent-chat-send" });
+    setIcon(this.sendBtn, "send");
+
+    // Dropdown for @ file references, anchored above the input row.
+    this.suggestEl = inputRow.createDiv({ cls: "agent-suggest" });
+    this.suggestEl.style.display = "none";
+
+    this.sendBtn.addEventListener("click", () => {
+      if (this.busy) {
+        // While running, the send button acts as a stop button.
+        this.agent.cancel();
+        new Notice(this.tr("agentStopping"));
+      } else {
+        void this.send();
+      }
+    });
+    this.inputEl.addEventListener("input", () => {
+      this.updateSuggestions();
+      this.autoGrowInput();
+    });
+    this.inputEl.addEventListener("keydown", (e) => {
+      if (this.suggestFiles.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          this.suggestIdx = (this.suggestIdx + 1) % this.suggestFiles.length;
+          this.renderSuggestions();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          this.suggestIdx = (this.suggestIdx - 1 + this.suggestFiles.length) % this.suggestFiles.length;
+          this.renderSuggestions();
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          this.pickSuggestion(this.suggestFiles[this.suggestIdx]);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          this.closeSuggestions();
+          return;
+        }
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void this.send();
+      }
+    });
+
+    this.updateUsage();
+
+    // Restore the most recent session.
+    await this.store.load();
+    this.refreshSessionPicker();
+    const recent = this.store.list()[0];
+    if (recent && recent.messages.length > 0) {
+      this.sessionId = recent.id;
+      this.history = recent.messages;
+      this.renderHistory();
+      this.refreshSessionPicker();
+      this.updateUsage();
+    }
+  }
+
+  /** Rebuild the session dropdown from the store. */
+  private refreshSessionPicker(): void {
+    const sel = this.sessionSelect;
+    if (!sel) return;
+    sel.empty();
+    const currentOpt = sel.createEl("option", {
+      text: this.sessionId ? this.store.get(this.sessionId)?.title ?? "current chat" : "(new chat)",
+      value: this.sessionId ?? "",
+    });
+    currentOpt.selected = true;
+    for (const s of this.store.list()) {
+      if (s.id === this.sessionId) continue;
+      sel.createEl("option", { text: s.title, value: s.id });
+    }
+  }
+
+  private loadSession(id: string): void {
+    if (this.busy) return;
+    const s = this.store.get(id);
+    if (!s) return;
+    this.sessionId = s.id;
+    this.history = s.messages;
+    this.renderHistory();
+    this.updateUsage();
+  }
+
+  /** Re-render bubbles from a loaded history. */
+  private renderHistory(): void {
+    this.messagesEl.empty();
+    for (const m of this.history) {
+      if (m.role === "user" && m.content) {
+        // Strip the injected referenced-files block for display.
+        const display = m.content.split("\n\n<referenced-files>")[0];
+        this.addBubble("agent-msg-user", display);
+      } else if (m.role === "assistant" && m.content) {
+        this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true });
+      } else if (m.role === "tool") {
+        const short = m.content && m.content.length > 200 ? m.content.slice(0, 200) + "…" : m.content ?? "";
+        this.addBubble("agent-msg-tool-result", `↳ ${m.name}: ${short}`);
+      }
+    }
+  }
+
+  /** Rough token estimate of the context window: chars / 4 (incl. system prompt allowance). */
+  private estimateContextTokens(): number {
+    let chars = 4000; // system prompt + memory + tool schemas allowance
+    for (const m of this.history) {
+      chars += (m.content?.length ?? 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0);
+    }
+    return Math.round(chars / 4);
+  }
+
+  private updateUsage(): void {
+    const tok = this.estimateContextTokens();
+    this.usageEl?.setText(`context ≈ ${tok >= 1000 ? (tok / 1000).toFixed(1) + "k" : tok} tok`);
+  }
+
+  private resetConversation(): void {
+    if (this.busy) return;
+    this.history = [];
+    this.sessionId = undefined;
+    this.refreshSessionPicker();
+    this.messagesEl.empty();
+    this.addBubble("agent-msg-assistant", this.tr("contextCleared"));
+    this.updateUsage();
+  }
+
+  /** Append a bubble. If `markdown` is true, renders text with Obsidian's
+   * MarkdownRenderer (nice for AI answers); otherwise plain text.
+   * Assistant messages also get a copy button. */
+  private addBubble(cls: string, text: string, opts?: { markdown?: boolean; copyable?: boolean }): HTMLElement {
+    const el = this.messagesEl.createDiv({ cls: `agent-msg ${cls}` });
+
+    if (opts?.copyable) {
+      const copyBtn = el.createEl("button", { cls: "agent-copy-btn", attr: { "aria-label": "copy" } });
+      setIcon(copyBtn, "copy");
+      copyBtn.addEventListener("click", () => {
+        void navigator.clipboard.writeText(text);
+        setIcon(copyBtn, "check");
+        copyBtn.addClass("copied");
+        window.setTimeout(() => { setIcon(copyBtn, "copy"); copyBtn.removeClass("copied"); }, 1500);
+      });
+    }
+
+    if (opts?.markdown) {
+      MarkdownRenderer.render(this.app, text, el, "", this);
+    } else {
+      el.createSpan({ text });
+    }
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    return el;
+  }
+
+  /** Auto-grow the textarea with content up to its max-height. */
+  private autoGrowInput(): void {
+    this.inputEl.style.height = "auto";
+    this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 120) + "px";
+  }
+
+  // ---------- @ file references ----------
+
+  private updateSuggestions(): void {
+    const caret = this.inputEl.selectionStart ?? 0;
+    const upToCaret = this.inputEl.value.slice(0, caret);
+    const at = upToCaret.lastIndexOf("@");
+    if (at < 0 || upToCaret.slice(at).includes("\n")) { this.closeSuggestions(); return; }
+    // '@' must start a token (beginning of text or after whitespace).
+    if (at > 0 && !/\s/.test(upToCaret[at - 1])) { this.closeSuggestions(); return; }
+    const query = upToCaret.slice(at + 1).toLowerCase();
+    this.suggestFiles = this.app.vault.getMarkdownFiles()
+      .filter((f) => f.path.toLowerCase().includes(query))
+      .sort((a, b) => a.path.length - b.path.length)
+      .slice(0, MAX_SUGGESTIONS);
+    this.suggestFrom = at;
+    this.suggestIdx = 0;
+    this.renderSuggestions();
+  }
+
+  private renderSuggestions(): void {
+    const el = this.suggestEl;
+    if (!el) return;
+    el.empty();
+    if (this.suggestFiles.length === 0) {
+      el.style.display = "none";
+      return;
+    }
+    this.suggestFiles.forEach((f, i) => {
+      const item = el.createDiv({ cls: `agent-suggest-item${i === this.suggestIdx ? " is-active" : ""}` });
+      item.setText(f.path);
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep textarea focus
+        this.pickSuggestion(f);
+      });
+    });
+    el.style.display = "block";
+  }
+
+  private pickSuggestion(file: TFile): void {
+    const caret = this.inputEl.selectionStart ?? 0;
+    const before = this.inputEl.value.slice(0, this.suggestFrom);
+    const after = this.inputEl.value.slice(caret);
+    const inserted = `@${file.path} `;
+    this.inputEl.value = before + inserted + after;
+    const pos = (before + inserted).length;
+    this.inputEl.setSelectionRange(pos, pos);
+    this.closeSuggestions();
+    this.inputEl.focus();
+  }
+
+  private closeSuggestions(): void {
+    this.suggestFiles = [];
+    this.suggestFrom = -1;
+    if (this.suggestEl) this.suggestEl.style.display = "none";
+  }
+
+  /** Expand @path references in the message into file contents for the model. */
+  private async buildPayload(text: string): Promise<string> {
+    const refs = this.app.vault.getMarkdownFiles()
+      .filter((f) => text.includes(`@${f.path}`))
+      .slice(0, MAX_FILE_REFS);
+    if (refs.length === 0) return text;
+    const cfg = {
+      enabled: this.plugin.settings.truncateEnabled !== false,
+      maxLines: this.plugin.settings.truncateMaxLines > 0 ? this.plugin.settings.truncateMaxLines : 200,
+    };
+    const parts: string[] = [];
+    for (const f of refs) {
+      try {
+        const content = truncateText(await this.app.vault.read(f), cfg);
+        parts.push(`<file path="${f.path}">\n${content}\n</file>`);
+      } catch {
+        // Skip unreadable files silently.
+      }
+    }
+    if (parts.length === 0) return text;
+    return `${text}\n\n<referenced-files>\n${parts.join("\n\n")}\n</referenced-files>`;
+  }
+
+  /** Downscale/compress an image file to base64 (keeps quality, drops size). */
+  private compressImage(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Failed to read image"));
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > height && width > MAX_IMAGE_SIDE) {
+            height = Math.round(height * (MAX_IMAGE_SIDE / width));
+            width = MAX_IMAGE_SIDE;
+          } else if (height > MAX_IMAGE_SIDE) {
+            width = Math.round(width * (MAX_IMAGE_SIDE / height));
+            height = MAX_IMAGE_SIDE;
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { reject(new Error("Canvas not supported")); return; }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
+        };
+        img.onerror = () => reject(new Error("Image failed to decode"));
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /** Recognize an image with the vision model and insert the text into the input. */
+  private async handleImage(file: File): Promise<void> {
+    const { visionEnabled, visionBaseUrl, visionApiKey, visionModel } = this.plugin.settings;
+    if (!visionEnabled) {
+      new Notice(this.tr("visionNotEnabled"));
+      return;
+    }
+    if (!visionApiKey) {
+      new Notice(this.tr("visionNoKey"));
+      return;
+    }
+
+    const statusEl = this.addBubble("agent-msg-tool-result", this.tr("recognizing"));
+    try {
+      const base64 = await this.compressImage(file);
+      const text = await visionDescribe({
+        baseUrl: visionBaseUrl,
+        apiKey: visionApiKey,
+        model: visionModel,
+        images: [base64],
+      });
+      statusEl.firstElementChild?.setText(`${this.tr("recognized")}${file.name || "image"}):`);
+      const current = this.inputEl.value;
+      const insert = current.length > 0 ? `\n\n[图片识别结果]\n${text}` : `[图片识别结果]\n${text}`;
+      this.inputEl.value = current + insert;
+      this.inputEl.focus();
+    } catch (e) {
+      statusEl.firstElementChild?.setText(`${this.tr("recognitionFailed")}${(e as Error).message}`);
+      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+    } finally {
+      if (this.imageInput) this.imageInput.value = "";
+    }
+  }
+
+  private async send(): Promise<void> {
+    const text = this.inputEl.value.trim();
+    if (!text || this.busy) return;
+    if (!this.plugin.settings.apiKey) {
+      new Notice(this.tr("noApiKey"));
+      return;
+    }
+
+    this.busy = true;
+    this.sendBtn.disabled = false;
+    setIcon(this.sendBtn, "square"); // stop icon while running
+    this.sendBtn.setAttr("aria-label", this.tr("stop"));
+    this.inputEl.value = "";
+    this.closeSuggestions();
+    this.addBubble("agent-msg-user", text, { copyable: true });
+    const payload = await this.buildPayload(text);
+
+    // Refresh agent in case settings changed.
+    this.agent = new ObsidianAgent(this.app, this.plugin.settings, this.plugin.consent, this.plugin.undo);
+
+    // Live assistant bubble: re-renders markdown as text streams in.
+    const liveEl = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-assistant agent-msg-live" });
+    const liveContent = liveEl.createDiv({ cls: "agent-msg-body" });
+
+    const renderLive = (md: string): void => {
+      liveContent.empty();
+      MarkdownRenderer.render(this.app, md, liveContent, "", this);
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    };
+    renderLive("…");
+
+    try {
+      let lastAssistant = "";
+      this.history = await this.agent.run(this.history, payload, (e) => {
+        if (e.type === "assistant") {
+          lastAssistant = e.content;
+          renderLive(e.content);
+        } else if (e.type === "thinking") {
+          const short = e.content.length > 500 ? e.content.slice(0, 500) + "…" : e.content;
+          this.addBubble("agent-msg-thinking", `🧠 ${short}`);
+        } else if (e.type === "tool_call") {
+          this.addBubble("agent-msg-tool", `⚙ ${e.name}(${e.content})`);
+        } else if (e.type === "tool_result") {
+          const short = e.content.length > 300 ? e.content.slice(0, 300) + "…" : e.content;
+          this.addBubble("agent-msg-tool-result", `↳ ${short}`);
+        }
+      });
+      if (!lastAssistant) renderLive(this.tr("noTextAnswer"));
+      // Convert the live bubble into a copyable static bubble.
+      if (lastAssistant) {
+        liveEl.remove();
+        this.addBubble("agent-msg-assistant", lastAssistant, { markdown: true, copyable: true });
+      }
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      // Persist the conversation.
+      this.sessionId = await this.store.save(this.history, this.sessionId);
+      this.refreshSessionPicker();
+    } catch (e) {
+      renderLive(`Error: ${(e as Error).message}`);
+      new Notice(`Agent error: ${(e as Error).message}`);
+    } finally {
+      this.busy = false;
+      setIcon(this.sendBtn, "send");
+      this.sendBtn.setAttr("aria-label", this.tr("send"));
+      this.sendBtn.disabled = false;
+    }
+  }
+
+  async onClose(): Promise<void> { /* nothing to clean */ }
+}

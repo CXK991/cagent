@@ -1,0 +1,9 @@
+{
+  "id": "cagent",
+  "name": "Cagent",
+  "version": "1.0.5",
+  "minAppVersion": "1.8.0",
+  "description": "个人 AI 学习助手（基于 obsidian-agent 二次开发）。支持 DeepSeek 文本对话 + 千问视觉模型识图，用于考研错题整理与知识管理。",
+  "author": "cxk991",
+  "isDesktopOnly": false
+}
