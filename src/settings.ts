@@ -59,7 +59,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   visionEnabled: false,
   visionBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
   visionApiKey: "",
-  visionModel: "qwen-vl-plus",
+  visionModel: "qwen-vl-max",
   temperature: 0.7,
   maxTokens: 4096,
   systemPromptOverride: "",

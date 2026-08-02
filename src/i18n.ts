@@ -14,6 +14,7 @@ const zh = {
   addImage: "添加图片（识图）",
   takePhoto: "拍照",
   viewImage: "点击查看原图",
+  viewImageFailed: "图片预览失败：当前环境不支持文件写入。",
   newConversation: "新对话（清空上下文）",
   send: "发送",
   stop: "停止",
@@ -104,7 +105,7 @@ const zh = {
   visionApiKey: "视觉模型 API Key",
   visionApiKeyDesc: "视觉接口的令牌（百炼的 API Key 可直接使用）。",
   visionModel: "视觉模型",
-  visionModelDesc: "多模态模型 ID，例如 qwen-vl-plus、qwen-vl-max、gpt-4o-mini。",
+  visionModelDesc: "多模态模型 ID。图文理解最强：qwen-vl-max（默认）；性价比：qwen-vl-plus；最新代：qwen3-vl-plus。",
 
   openMode: "对话打开方式",
   openModeDesc: "左侧栏图标点击后在哪里打开对话。两个命令始终可用。",
@@ -137,6 +138,7 @@ const en: Record<Key, string> = {
   addImage: "Add an image (vision)",
   takePhoto: "Take photo",
   viewImage: "Click to view full image",
+  viewImageFailed: "Image preview unavailable: file write not supported here.",
   newConversation: "New conversation (clear context)",
   send: "Send",
   stop: "Stop",
@@ -225,7 +227,7 @@ const en: Record<Key, string> = {
   visionApiKey: "Vision API key",
   visionApiKeyDesc: "Bearer token for the vision endpoint. DashScope key works here.",
   visionModel: "Vision model",
-  visionModelDesc: "Multimodal model id, e.g. qwen-vl-plus, qwen-vl-max, or gpt-4o-mini.",
+  visionModelDesc: "Multimodal model id. Best image understanding: qwen-vl-max (default); budget: qwen-vl-plus; newest: qwen3-vl-plus.",
 
   openMode: "Chat open mode",
   openModeDesc: "Where the ribbon icon opens the agent chat. Both commands stay available regardless.",

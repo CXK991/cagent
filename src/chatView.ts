@@ -382,7 +382,8 @@ export class AgentChatView extends ItemView {
     try {
       const adapter = this.app.vault.adapter;
       if (!(adapter instanceof FileSystemAdapter)) {
-        new Notice(this.tr("visionNotEnabled"));
+        // No filesystem adapter (e.g. some mobile setups) — just log, can't preview.
+        new Notice(this.tr("viewImageFailed"));
         return;
       }
       const vaultPath = normalizePath(`.trash/cagent-view-${Date.now()}.jpg`);
