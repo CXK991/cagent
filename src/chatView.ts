@@ -1,4 +1,4 @@
-import { FileSystemAdapter, ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, normalizePath, setIcon } from "obsidian";
+import { ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, normalizePath, setIcon } from "obsidian";
 import { ObsidianAgent } from "./agent";
 import { truncateText } from "./tools";
 import { SessionStore } from "./sessions";
@@ -52,6 +52,10 @@ export class AgentChatView extends ItemView {
   // Pending image attachments (sent as message bubbles, not pasted text).
   private pendingImages: Array<{ data: string; name: string }> = [];
   private previewRow?: HTMLElement;
+
+  // Time grouping: only show a timestamp if it differs from the previous one
+  // by more than this many ms.
+  private lastShownTs = 0;
 
   constructor(leaf: WorkspaceLeaf, private plugin: AgentPlugin) {
     super(leaf);
@@ -231,7 +235,7 @@ export class AgentChatView extends ItemView {
 
     this.updateUsage();
 
-    // Restore the most recent session.
+    // Restore the most recent session, or show a welcome page if empty.
     await this.store.load();
     this.refreshSessionPicker();
     const recent = this.store.list()[0];
@@ -241,6 +245,34 @@ export class AgentChatView extends ItemView {
       this.renderHistory();
       this.refreshSessionPicker();
       this.updateUsage();
+    } else {
+      this.renderWelcome();
+    }
+  }
+
+  /** Centered welcome page shown when there are no messages yet. */
+  private renderWelcome(): void {
+    if (!this.messagesEl) return;
+    this.messagesEl.empty();
+    const welcome = this.messagesEl.createDiv({ cls: "agent-welcome" });
+
+    const logo = welcome.createDiv({ cls: "agent-welcome-logo", text: this.plugin.settings.aiAvatar || "🤖" });
+    welcome.createEl("h2", { cls: "agent-welcome-title", text: this.tr("welcomeTitle") });
+    welcome.createEl("p", { cls: "agent-welcome-sub", text: this.tr("welcomeSub") });
+
+    const tips = welcome.createDiv({ cls: "agent-welcome-tips" });
+    const tipsList = [
+      { icon: "camera", text: this.tr("welcomeTipPhoto") },
+      { icon: "help-circle", text: this.tr("welcomeTipAsk") },
+      { icon: "notebook-pen", text: this.tr("welcomeTipWrongQ") },
+      { icon: "image", text: this.tr("welcomeTipAnalyze") },
+    ];
+    for (const tip of tipsList) {
+      const item = tips.createDiv({ cls: "agent-welcome-tip" });
+      item.createSpan({ cls: "agent-welcome-tip-icon" });
+      const ic = item.querySelector(".agent-welcome-tip-icon");
+      if (ic) setIcon(ic as HTMLElement, tip.icon);
+      item.createSpan({ text: tip.text });
     }
   }
 
@@ -318,7 +350,7 @@ export class AgentChatView extends ItemView {
     this.searchIdx = -1;
     if (this.searchInput) this.searchInput.value = "";
     if (this.searchCountEl) this.searchCountEl.setText("");
-    this.addBubble("agent-msg-assistant", this.tr("contextCleared"));
+    this.renderWelcome();
     this.updateUsage();
   }
 
@@ -332,24 +364,13 @@ export class AgentChatView extends ItemView {
   ): HTMLElement {
     const el = this.messagesEl.createDiv({ cls: `agent-msg ${cls}` });
 
-    // Bot avatar for assistant messages.
-    if (cls.includes("assistant")) {
-      const avatar = el.createDiv({ cls: "agent-msg-avatar" });
-      setIcon(avatar, "bot");
-    }
+    // Avatar: AI (assistant) or user. Uses the configured avatar text.
+    const avatar = el.createDiv({
+      cls: `agent-msg-avatar ${cls.includes("assistant") ? "is-ai" : "is-user"}`,
+      text: cls.includes("assistant") ? (this.plugin.settings.aiAvatar || "🤖") : (this.plugin.settings.userAvatar || "🧑"),
+    });
 
     const content = el.createDiv({ cls: "agent-msg-content" });
-
-    if (opts?.copyable) {
-      const copyBtn = el.createEl("button", { cls: "agent-copy-btn", attr: { "aria-label": this.tr("copy") } });
-      setIcon(copyBtn, "copy");
-      copyBtn.addEventListener("click", () => {
-        void navigator.clipboard.writeText(text);
-        setIcon(copyBtn, "check");
-        copyBtn.addClass("copied");
-        window.setTimeout(() => { setIcon(copyBtn, "copy"); copyBtn.removeClass("copied"); }, 1500);
-      });
-    }
 
     if (opts?.markdown) {
       MarkdownRenderer.render(this.app, text, content, "", this);
@@ -358,13 +379,29 @@ export class AgentChatView extends ItemView {
       content.createSpan({ text });
     }
 
-    // Timestamp.
+    // Timestamp (grouped: only when it differs enough from the previous one).
     if (opts?.ts) {
-      const time = content.createSpan({
-        cls: "agent-msg-time",
-        text: new Date(opts.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      if (Math.abs(opts.ts - this.lastShownTs) > 5 * 60 * 1000) {
+        const time = content.createSpan({
+          cls: "agent-msg-time",
+          text: new Date(opts.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        });
+        content.addClass("has-time");
+        this.lastShownTs = opts.ts;
+      }
+    }
+
+    // Action bar: small always-visible buttons under the message (mobile-friendly).
+    if (opts?.copyable) {
+      const bar = el.createDiv({ cls: "agent-msg-actions" });
+      const copyBtn = bar.createEl("button", { cls: "agent-msg-action", attr: { "aria-label": this.tr("copy") } });
+      setIcon(copyBtn, "copy");
+      copyBtn.addEventListener("click", () => {
+        void navigator.clipboard.writeText(text);
+        setIcon(copyBtn, "check");
+        copyBtn.addClass("copied");
+        window.setTimeout(() => { setIcon(copyBtn, "copy"); copyBtn.removeClass("copied"); }, 1500);
       });
-      content.addClass("has-time");
     }
 
     // Track for in-chat search.
@@ -379,23 +416,28 @@ export class AgentChatView extends ItemView {
   /** Write a base64 image to the vault as a temp file and open it in the
    * built-in image viewer (zoomable, scrollable). */
   private async openImageViewer(data: string, name: string): Promise<void> {
+    const tmpPath = normalizePath("Cagent-temp");
+    let file: TFile | null = null;
     try {
-      const adapter = this.app.vault.adapter;
-      if (!(adapter instanceof FileSystemAdapter)) {
-        // No filesystem adapter (e.g. some mobile setups) — just log, can't preview.
-        new Notice(this.tr("viewImageFailed"));
-        return;
-      }
-      const vaultPath = normalizePath(`.trash/cagent-view-${Date.now()}.jpg`);
-      const buf = Buffer.from(data, "base64");
-      // Ensure the folder exists.
-      await adapter.mkdir(normalizePath(".trash"));
-      await adapter.writeBinary(vaultPath, buf);
-      const tf = this.app.vault.getAbstractFileByPath(vaultPath);
-      if (tf instanceof TFile) {
-        const leaf = this.app.workspace.getLeaf("tab");
-        await leaf.openFile(tf);
-      }
+      const folder = this.app.vault.getAbstractFileByPath(tmpPath);
+      if (!folder) await this.app.vault.createFolder(tmpPath);
+
+      // Decode base64 to ArrayBuffer (cross-platform, no Buffer dependency).
+      const bin = atob(data);
+      const len = bin.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+
+      const fname = normalizePath(`${tmpPath}/view-${Date.now()}.jpg`);
+      file = await this.app.vault.createBinary(fname, bytes.buffer);
+    } catch (e) {
+      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+      return;
+    }
+
+    try {
+      const leaf = this.app.workspace.getLeaf("tab");
+      await leaf.openFile(file);
     } catch (e) {
       new Notice(`${this.tr("visionError")}${(e as Error).message}`);
     }
@@ -404,6 +446,7 @@ export class AgentChatView extends ItemView {
   /** User message bubble: optional image thumbnails + original text. */
   private addUserBubble(images: Array<{ data: string; name: string }>, text: string, ts: number): HTMLElement {
     const el = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-user" });
+    const avatar = el.createDiv({ cls: "agent-msg-avatar is-user", text: this.plugin.settings.userAvatar || "🧑" });
     const content = el.createDiv({ cls: "agent-msg-content" });
     for (const img of images) {
       const thumb = content.createEl("img", { cls: "agent-msg-img", attr: { alt: img.name, title: this.tr("viewImage") } });
@@ -411,11 +454,14 @@ export class AgentChatView extends ItemView {
       thumb.addEventListener("click", () => void this.openImageViewer(img.data, img.name));
     }
     if (text) content.createSpan({ text });
-    const time = content.createSpan({
-      cls: "agent-msg-time",
-      text: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    });
-    content.addClass("has-time");
+    if (Math.abs(ts - this.lastShownTs) > 5 * 60 * 1000) {
+      const time = content.createSpan({
+        cls: "agent-msg-time",
+        text: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
+      content.addClass("has-time");
+      this.lastShownTs = ts;
+    }
     this.bubbles.push({ el, text });
     if (this.plugin.settings.autoScroll !== false) {
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
@@ -798,18 +844,18 @@ export class AgentChatView extends ItemView {
 
     // Live assistant bubble: re-renders markdown as text streams in.
     const liveEl = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-assistant agent-msg-live" });
-    const liveAvatar = liveEl.createDiv({ cls: "agent-msg-avatar" });
-    setIcon(liveAvatar, "bot");
+    const liveAvatar = liveEl.createDiv({ cls: "agent-msg-avatar is-ai", text: this.plugin.settings.aiAvatar || "🤖" });
     const liveContent = liveEl.createDiv({ cls: "agent-msg-content" });
+    const cursor = liveEl.createSpan({ cls: "agent-typing-cursor", text: "▊" });
 
     const renderLive = (md: string): void => {
       liveContent.empty();
-      MarkdownRenderer.render(this.app, md, liveContent, "", this);
+      if (md) MarkdownRenderer.render(this.app, md, liveContent, "", this);
       if (this.plugin.settings.autoScroll !== false) {
         this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
       }
     };
-    renderLive("…");
+    renderLive("");
 
     try {
       let lastAssistant = "";

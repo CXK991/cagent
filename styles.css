@@ -36,15 +36,22 @@
 /* Avatar */
 .agent-msg-avatar {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--interactive-accent);
   color: var(--text-on-accent);
-  font-size: 14px;
+  font-size: 16px;
+  line-height: 1;
+  user-select: none;
+}
+
+.agent-msg-avatar.is-user {
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
 }
 
 .agent-msg-user {
@@ -73,33 +80,109 @@
   border-top-left-radius: 4px;
 }
 
-/* Copy button */
-.agent-copy-btn {
-  position: absolute;
-  top: -4px;
-  right: -4px;
+/* Action bar under each message (always visible, mobile-friendly) */
+.agent-msg-actions {
+  display: flex;
+  gap: 4px;
+  padding: 2px 2px 0;
+}
+
+.agent-msg-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 3px;
   cursor: pointer;
-  background: var(--background-primary);
   color: var(--text-muted);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  z-index: 2;
+  background: transparent;
+  border-radius: 5px;
+  font-size: 12px;
 }
 
-.agent-msg:hover .agent-copy-btn {
-  opacity: 1;
-}
-
-.agent-copy-btn:hover {
+.agent-msg-action:hover {
   color: var(--text-accent);
+  background: var(--background-modifier-hover);
 }
 
-.agent-copy-btn.copied {
+.agent-msg-action.copied {
   color: var(--text-success);
-  opacity: 1;
+}
+
+/* Typing cursor on streaming AI messages */
+.agent-typing-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--interactive-accent);
+  animation: cagent-blink 0.8s steps(1) infinite;
+}
+
+@keyframes cagent-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* Welcome page */
+.agent-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.agent-welcome-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 32px;
+  margin-bottom: 4px;
+}
+
+.agent-welcome-title {
+  margin: 0;
+  font-size: var(--font-ui-large);
+  color: var(--text-normal);
+}
+
+.agent-welcome-sub {
+  margin: 0 0 12px;
+  font-size: var(--font-ui-small);
+}
+
+.agent-welcome-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.agent-welcome-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  cursor: default;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+.agent-welcome-tip-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-accent);
 }
 
 /* Markdown inside bubbles */

@@ -28,6 +28,10 @@ export interface AgentSettings {
   showToolCalls: boolean;
   /** Auto-scroll to the newest message. */
   autoScroll: boolean;
+  /** Custom avatar text (emoji or short text) for the user. */
+  userAvatar: string;
+  /** Custom avatar text (emoji or short text) for the AI. */
+  aiAvatar: string;
   maxIterations: number;
   unlimitedIterations: boolean;
   openMode: "sidebar" | "tab";
@@ -66,6 +70,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   thinkingCollapsed: true,
   showToolCalls: true,
   autoScroll: true,
+  userAvatar: "🧑",
+  aiAvatar: "🤖",
   maxIterations: 10,
   unlimitedIterations: false,
   openMode: "sidebar",
@@ -415,6 +421,26 @@ export class AgentSettingTab extends PluginSettingTab {
       .addToggle((tg) =>
         tg.setValue(this.plugin.settings.autoScroll).onChange(async (v) => {
           this.plugin.settings.autoScroll = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("userAvatar"))
+      .setDesc(this.tr("userAvatarDesc"))
+      .addText((t) =>
+        t.setValue(this.plugin.settings.userAvatar).onChange(async (v) => {
+          this.plugin.settings.userAvatar = v.trim() || "🧑";
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("aiAvatar"))
+      .setDesc(this.tr("aiAvatarDesc"))
+      .addText((t) =>
+        t.setValue(this.plugin.settings.aiAvatar).onChange(async (v) => {
+          this.plugin.settings.aiAvatar = v.trim() || "🤖";
           await this.plugin.saveSettings();
         })
       );
