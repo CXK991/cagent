@@ -281,6 +281,33 @@
   padding-left: 8px;
 }
 
+/* Floating "back to latest" button */
+.agent-to-bottom {
+  position: absolute;
+  right: 18px;
+  bottom: 84px;
+  z-index: 20;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  border: none;
+}
+
+.agent-to-bottom:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.agent-chat-root {
+  position: relative;
+}
+
 /* ---------- Input area ---------- */
 
 /* Pending-image preview row above the input */

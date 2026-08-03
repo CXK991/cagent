@@ -126,6 +126,21 @@ export class AgentChatView extends ItemView {
 
     this.messagesEl = root.createDiv({ cls: "agent-chat-messages" });
 
+    // Floating "back to latest" button — shows when scrolled away from bottom.
+    const toBottomBtn = root.createEl("button", { cls: "agent-to-bottom" });
+    setIcon(toBottomBtn, "down-to-line");
+    toBottomBtn.style.display = "none";
+    toBottomBtn.setAttr("aria-label", this.tr("toLatest"));
+    toBottomBtn.addEventListener("click", () => {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      toBottomBtn.style.display = "none";
+    });
+    this.messagesEl.addEventListener("scroll", () => {
+      const el = this.messagesEl;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      toBottomBtn.style.display = nearBottom ? "none" : "flex";
+    });
+
     // Pending-image preview row (thumbnails, removable).
     this.previewRow = root.createDiv({ cls: "agent-preview-row" });
 
@@ -243,6 +258,8 @@ export class AgentChatView extends ItemView {
       this.renderHistory();
       this.refreshSessionPicker();
       this.updateUsage();
+      // Jump to the latest message after restoring history.
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     } else {
       this.renderWelcome();
     }
