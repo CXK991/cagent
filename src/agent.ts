@@ -51,7 +51,18 @@ export async function buildSystemPrompt(app: App, override?: string): Promise<st
   const base = override && override.trim().length > 0
     ? `${override.trim()}\n\n${BASE_PROMPT}`
     : BASE_PROMPT;
-  return `${base}
+  // Inject the current date/time so the model knows "now" (LLMs don't know the clock).
+  const now = new Date();
+  const nowStr = now.toLocaleString(undefined, {
+    dateStyle: "full",
+    timeStyle: "short",
+    hour12: false,
+  });
+  return `<Current time>
+${nowStr}
+</Current time>
+
+${base}
 
 <Long-term memory (AGENT/memory.md)>
 ${memory.trim() || "(empty)"}
