@@ -2,7 +2,7 @@
 // until the model answers with plain text or max iterations is reached.
 
 import { App } from "obsidian";
-import { chatCompletion, ChatMessage } from "./openai";
+import { chatCompletion, sanitizeMessages, ChatMessage } from "./openai";
 import { buildObsidianTools, Tool } from "./tools";
 import { ensureAgentWorkspace, loadMemory, listSkills } from "./memory";
 import { validateArgs } from "./validate";
@@ -105,9 +105,13 @@ export class ObsidianAgent {
     userInput: string,
     onEvent: AgentEventHandler
   ): Promise<ChatMessage[]> {
+    // Sanitize the history first: drop orphan tool messages and trim any
+    // incomplete trailing tool round that would cause a provider 400.
+    const cleanHistory = sanitizeMessages(history);
+
     const messages: ChatMessage[] = [
       { role: "system", content: await buildSystemPrompt(this.app, this.settings.systemPromptOverride) },
-      ...history,
+      ...cleanHistory,
       { role: "user", content: userInput },
     ];
 

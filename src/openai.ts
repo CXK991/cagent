@@ -24,6 +24,59 @@ interface ImageContentPart {
   image_url: { url: string };
 }
 
+/**
+ * Strip "orphan" tool messages (a `role: "tool"` reply with no preceding
+ * assistant message that requested that tool_call_id) and trim any incomplete
+ * trailing tool round. Providers reject histories that end on an unmatched tool
+ * message or where a tool reply has no corresponding tool_calls.
+ */
+export function sanitizeMessages(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  // Ids still expecting a tool reply from the last assistant(tool_calls) message.
+  let pending: Set<string> | null = null;
+  // Index of the last assistant(tool_calls) message pushed to `out`.
+  let lastToolCallIdx = -1;
+
+  for (const m of messages) {
+    if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
+      pending = new Set(m.tool_calls.map((t) => t.id));
+      lastToolCallIdx = out.length;
+      out.push(m);
+    } else if (m.role === "tool") {
+      // Keep only if it replies to an outstanding tool call.
+      if (pending && m.tool_call_id && pending.has(m.tool_call_id)) {
+        out.push(m);
+        pending.delete(m.tool_call_id);
+        if (pending.size === 0) pending = null;
+      }
+      // else: orphan tool message → drop.
+    } else {
+      // user / plain assistant / system resets the tool round.
+      pending = null;
+      lastToolCallIdx = -1;
+      out.push(m);
+    }
+  }
+
+  // If the history ends mid-tool-round (last message is a tool reply, or an
+  // assistant(tool_calls) that never got a reply), cut back to the last
+  // completed turn to avoid a provider 400.
+  const last = out[out.length - 1];
+  if (last) {
+    if (last.role === "tool" && lastToolCallIdx >= 0) {
+      out.length = lastToolCallIdx;
+    }
+    const end = out[out.length - 1];
+    if (end && end.role === "assistant" && end.tool_calls && end.tool_calls.length > 0) {
+      // Assistant asked for tools but has no replies — drop the tool_calls so
+      // the history is valid, keeping any plain text content.
+      out[out.length - 1] = { ...end, tool_calls: undefined };
+    }
+  }
+
+  return out;
+}
+
 export interface ToolCall {
   id: string;
   type: "function";

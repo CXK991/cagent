@@ -460,6 +460,18 @@ export class AgentChatView extends ItemView {
       content.addClass("has-time");
       this.lastShownTs = ts;
     }
+    // Action bar: copy button on user messages too.
+    const bar = el.createDiv({ cls: "agent-msg-actions" });
+    const copyBtn = bar.createEl("button", { cls: "agent-msg-action", attr: { "aria-label": this.tr("copy") } });
+    setIcon(copyBtn, "copy");
+    copyBtn.addEventListener("click", () => {
+      const toCopy = text || (images.map((i) => `[图片: ${i.name}]`).join("\n"));
+      void navigator.clipboard.writeText(toCopy);
+      setIcon(copyBtn, "check");
+      copyBtn.addClass("copied");
+      window.setTimeout(() => { setIcon(copyBtn, "copy"); copyBtn.removeClass("copied"); }, 1500);
+    });
+
     this.bubbles.push({ el, text });
     if (this.plugin.settings.autoScroll !== false) {
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
