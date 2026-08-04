@@ -52,17 +52,18 @@ export async function buildSystemPrompt(app: App, override?: string): Promise<st
     ? `${override.trim()}\n\n${BASE_PROMPT}`
     : BASE_PROMPT;
   // Inject the current date/time so the model knows "now" (LLMs don't know the clock).
+  // NOTE: keep it at the END of the system prompt, after all static parts.
+  // Prompt caches (DeepSeek context cache, etc.) match on a stable byte prefix;
+  // a dynamic timestamp at the START would invalidate the whole prefix on every
+  // request, dropping the cache-hit rate to ~0%. The static BASE_PROMPT (and
+  // memory/skills, which change rarely) stays a cacheable prefix this way.
   const now = new Date();
   const nowStr = now.toLocaleString(undefined, {
     dateStyle: "full",
     timeStyle: "short",
     hour12: false,
   });
-  return `<Current time>
-${nowStr}
-</Current time>
-
-${base}
+  return `${base}
 
 <Long-term memory (AGENT/memory.md)>
 ${memory.trim() || "(empty)"}
@@ -70,7 +71,11 @@ ${memory.trim() || "(empty)"}
 
 <Available skills (AGENT/skills/) — load one with read_skill when relevant>
 ${skillLines}
-</Available skills>`;
+</Available skills>
+
+<Current time>
+${nowStr}
+</Current time>`;
 }
 
 export class ObsidianAgent {
