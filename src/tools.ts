@@ -1,7 +1,7 @@
 // Wraps the Obsidian API as function-calling tools.
 // Each tool = OpenAI tool schema + an executor against the live vault/workspace.
 
-import { App, MarkdownView, TFile, TFolder, normalizePath, parseYaml, stringifyYaml } from "obsidian";
+import { App, MarkdownView, TFile, TFolder, normalizePath, parseYaml, requestUrl, stringifyYaml } from "obsidian";
 import type { ToolDefinition } from "./openai";
 import { appendMemory, loadMemory, listSkills, readSkill } from "./memory";
 import type { UndoManager } from "./undo";
@@ -175,7 +175,8 @@ function getCommandsApi(app: App): CommandsApi | undefined {
 export function buildObsidianTools(
   app: App,
   getTruncate: () => TruncateConfig = () => DEFAULT_TRUNCATE,
-  undo?: UndoManager
+  undo?: UndoManager,
+  searchApiKey?: () => string
 ): Tool[] {
   const vault = app.vault;
 
@@ -265,6 +266,40 @@ export function buildObsidianTools(
           }
         }
         return ok(results);
+      }
+    ),
+
+    // ---------- Web search (Tavily) ----------
+    tool(
+      "web_search",
+      "Search the internet for information (problems, concepts, references). Returns ranked results with titles and snippets. Use when you need facts or examples that are not in the user's vault. Requires the search API key to be configured in settings.",
+      {
+        query: str("The search query, in the user's language when appropriate"),
+        max_results: { type: "number", description: "Max results to return (default 5, max 10)" },
+      },
+      ["query"],
+      async ({ query, max_results }) => {
+        const key = searchApiKey ? searchApiKey() : "";
+        if (!key) return err("Web search is not configured: add a Tavily API key in Cagent settings.");
+        const max = Math.min(Math.max(1, Number(max_results) || 5), 10);
+        try {
+          const res = await requestUrl({
+            url: "https://api.tavily.com/search",
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ api_key: key, query: String(query), max_results: max }),
+            throw: false,
+          });
+          if (res.status >= 400) return err(`Search API error ${res.status}: ${res.text?.slice(0, 200) ?? ""}`);
+          const data = res.json;
+          const results = (Array.isArray(data.results) ? data.results : [])
+            .map((r: { title?: unknown; content?: unknown; url?: unknown }) => ({
+              title: typeof r.title === "string" ? r.title : "",
+              content: typeof r.content === "string" ? r.content.slice(0, 500) : "",
+              url: typeof r.url === "string" ? r.url : "",
+            }));
+          return ok(results);
+        } catch (e) { return err((e as Error).message); }
       }
     ),
 

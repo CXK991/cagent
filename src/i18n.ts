@@ -118,6 +118,12 @@ const zh = {
   visionModel: "视觉模型",
   visionModelDesc: "多模态模型 ID。图文理解最强：qwen-vl-max（默认）；性价比：qwen-vl-plus；最新代：qwen3-vl-plus。",
 
+  secSearch: "联网搜索",
+  search: "联网搜索（Web Search）",
+  searchDesc: "让 AI 能搜索网页并总结结果（搜题、查知识点）。基于 Tavily API。启用后需填写下方 API Key。",
+  searchApiKey: "Tavily API Key",
+  searchApiKeyDesc: "在 tavily.com 注册后从控制台获取。免费额度每月 1000 次。",
+
   openMode: "对话打开方式",
   openModeDesc: "左侧栏图标点击后在哪里打开对话。两个命令始终可用。",
   sidebar: "侧边栏（右侧栏）",
@@ -250,6 +256,12 @@ const en: Record<Key, string> = {
   visionApiKeyDesc: "Bearer token for the vision endpoint. DashScope key works here.",
   visionModel: "Vision model",
   visionModelDesc: "Multimodal model id. Best image understanding: qwen-vl-max (default); budget: qwen-vl-plus; newest: qwen3-vl-plus.",
+
+  secSearch: "Web Search",
+  search: "Web search",
+  searchDesc: "Let the AI search the web and summarize results (look up problems, facts). Powered by Tavily. Requires an API key below.",
+  searchApiKey: "Tavily API Key",
+  searchApiKeyDesc: "Get one from your tavily.com dashboard. Free tier: 1000 searches/month.",
 
   openMode: "Chat open mode",
   openModeDesc: "Where the ribbon icon opens the agent chat. Both commands stay available regardless.",

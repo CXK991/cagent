@@ -40,6 +40,7 @@ Guidelines:
 - Prefer small, safe edits: append, find_replace_in_note, frontmatter tools or selection/cursor edits over overwrite.
 - When you modify files, tell the user exactly what you changed.
 - Vault-relative paths always end with .md for notes.
+- If a web_search tool is available, you can use it to look up information outside the vault (facts, problem solutions, references). Prefer searching the vault first when the answer may be in the user's notes.
 - Your workspace is the AGENT/ folder: AGENT/memory.md is your long-term memory (always injected below; persist important facts with update_memory), AGENT/skills/ holds reusable skill files — when a listed skill matches the task, call read_skill to load and follow it.`;
 
 export async function buildSystemPrompt(app: App, override?: string): Promise<string> {
@@ -99,7 +100,7 @@ export class ObsidianAgent {
     this.tools = buildObsidianTools(app, () => ({
       enabled: this.settings.truncateEnabled !== false,
       maxLines: this.settings.truncateMaxLines > 0 ? this.settings.truncateMaxLines : 200,
-    }), undo);
+    }), undo, () => (this.settings.searchEnabled ? this.settings.searchApiKey : ""));
     this.toolMap = new Map(this.tools.map((t) => [t.definition.function.name, t]));
   }
 

@@ -16,6 +16,9 @@ export interface AgentSettings {
   visionBaseUrl: string;
   visionApiKey: string;
   visionModel: string;
+  /** Web search (Tavily) — enables the AI to search the internet. */
+  searchEnabled: boolean;
+  searchApiKey: string;
   /** Sampling temperature (0–2). */
   temperature: number;
   /** Max completion tokens. */
@@ -64,6 +67,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   visionBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
   visionApiKey: "",
   visionModel: "qwen-vl-max",
+  searchEnabled: false,
+  searchApiKey: "",
   temperature: 0.7,
   maxTokens: 4096,
   systemPromptOverride: "",
@@ -312,6 +317,32 @@ export class AgentSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
         );
+    }
+
+    // ---- Web search (Tavily) ----
+    this.section(containerEl, this.tr("secSearch"));
+    new Setting(containerEl)
+      .setName(this.tr("search"))
+      .setDesc(this.tr("searchDesc"))
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.searchEnabled).onChange(async (v) => {
+          this.plugin.settings.searchEnabled = v;
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+
+    if (this.plugin.settings.searchEnabled) {
+      new Setting(containerEl)
+        .setName(this.tr("searchApiKey"))
+        .setDesc(this.tr("searchApiKeyDesc"))
+        .addText((t) => {
+          t.inputEl.type = "password";
+          t.setValue(this.plugin.settings.searchApiKey).onChange(async (v) => {
+            this.plugin.settings.searchApiKey = v.trim();
+            await this.plugin.saveSettings();
+          });
+        });
     }
 
     new Setting(containerEl)
