@@ -11,9 +11,11 @@ import type { UndoManager } from "./undo";
 import type { AgentSettings } from "./settings";
 
 export interface AgentEvent {
-  type: "tool_call" | "tool_result" | "assistant" | "thinking" | "error";
+  type: "tool_call" | "tool_result" | "assistant" | "thinking" | "error" | "usage";
   name?: string;
   content: string;
+  /** Token/cache usage from the last completion (forwarded for the UI). */
+  usage?: { cache_hit_tokens?: number; cache_miss_tokens?: number; prompt_tokens?: number };
 }
 
 export type AgentEventHandler = (e: AgentEvent) => void;
@@ -149,6 +151,19 @@ export class ObsidianAgent {
 
       const msg = result.message;
       messages.push(msg);
+
+      // Forward cache/token usage so the UI can show the prompt-cache hit rate.
+      if (result.usage) {
+        onEvent({
+          type: "usage",
+          content: "",
+          usage: {
+            cache_hit_tokens: result.usage.cache_hit_tokens,
+            cache_miss_tokens: result.usage.cache_miss_tokens,
+            prompt_tokens: result.usage.prompt_tokens,
+          },
+        });
+      }
 
       if (result.thinking) {
         onEvent({ type: "thinking", content: result.thinking });

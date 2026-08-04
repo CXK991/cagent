@@ -1,5 +1,11 @@
 # Cagent 更新日志
 
+## [1.0.9] - 2026-08-04
+
+### 性能
+- **发送前剥离冗余字段**：历史消息里的 `ts`、`prompt`、`images`（海量 base64 图片数据）不再序列化进请求体——它们对主模型无用却烧钱、且破坏缓存前缀稳定。现在发送给 API 的是纯净的标准字段，大幅降低 token 消耗、提升缓存命中。
+- **缓存命中率显示**：底部状态栏现在显示 `cache X%`（基于 DeepSeek 的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，兼容 OpenAI `prompt_tokens_details.cached_tokens`），可直接看到优化效果。
+
 ## [1.0.8] - 2026-08-04
 
 ### 性能

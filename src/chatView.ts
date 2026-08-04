@@ -25,6 +25,8 @@ export class AgentChatView extends ItemView {
   private imageInput?: HTMLInputElement;
   private cameraInput?: HTMLInputElement;
   private busy = false;
+  /** Latest completion's prompt-cache stats, for the footer display. */
+  private lastUsage: { cache_hit_tokens?: number; cache_miss_tokens?: number } = {};
 
   // @ file-reference suggestions
   private suggestEl?: HTMLElement;
@@ -351,7 +353,16 @@ export class AgentChatView extends ItemView {
 
   private updateUsage(): void {
     const tok = this.estimateContextTokens();
-    this.usageEl?.setText(`context ≈ ${tok >= 1000 ? (tok / 1000).toFixed(1) + "k" : tok} tok`);
+    let text = `context ≈ ${tok >= 1000 ? (tok / 1000).toFixed(1) + "k" : tok} tok`;
+    const { cache_hit_tokens, cache_miss_tokens } = this.lastUsage;
+    if (cache_hit_tokens !== undefined && cache_miss_tokens !== undefined) {
+      const total = cache_hit_tokens + cache_miss_tokens;
+      if (total > 0) {
+        const pct = Math.round((cache_hit_tokens / total) * 100);
+        text += ` · cache ${pct}%`;
+      }
+    }
+    this.usageEl?.setText(text);
   }
 
   private resetConversation(): void {
@@ -893,6 +904,14 @@ export class AgentChatView extends ItemView {
       const collapsedThinking = this.plugin.settings.thinkingCollapsed !== false;
 
       this.history = await this.agent.run(this.history, payload, (e) => {
+        if (e.type === "usage" && e.usage) {
+          this.lastUsage = {
+            cache_hit_tokens: e.usage.cache_hit_tokens,
+            cache_miss_tokens: e.usage.cache_miss_tokens,
+          };
+          this.updateUsage();
+          return;
+        }
         if (e.type === "assistant") {
           lastAssistant = e.content;
           renderLive(e.content);

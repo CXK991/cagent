@@ -109,7 +109,15 @@ export interface ChatCompletionResult {
   finishReason: string;
   /** Model reasoning (DeepSeek-R1 reasoning_content or <think> block), if any. */
   thinking?: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    /** Prompt tokens served from cache (DeepSeek: prompt_cache_hit_tokens). */
+    cache_hit_tokens?: number;
+    /** Prompt tokens that missed the cache (DeepSeek: prompt_cache_miss_tokens). */
+    cache_miss_tokens?: number;
+  };
 }
 
 /** Classified errors so the UI can tell users what actually went wrong. */
@@ -163,9 +171,16 @@ function mapHttpError(status: number, detail: string): Error {
 export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
   const url = opts.baseUrl.replace(/\/+$/, "") + "/chat/completions";
 
+  // Strip non-standard fields (ts, prompt, images) before sending. They are
+  // display/UX-only; `images` in particular is huge base64 that the main text
+  // model never consumes (images are pre-recognized into `content` text).
+  // Sending them would inflate prompt tokens AND destabilize the byte prefix
+  // that prompt caches (DeepSeek context cache, etc.) match on.
+  const cleanMessages = opts.messages.map(({ ts, prompt, images, ...rest }) => rest);
+
   const body: Record<string, unknown> = {
     model: opts.model,
-    messages: opts.messages,
+    messages: cleanMessages,
   };
   if (opts.tools && opts.tools.length > 0) {
     body.tools = opts.tools;
@@ -203,6 +218,23 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
   const rawContent = typeof choice.message.content === "string" ? choice.message.content : "";
   const { text, thinking } = extractThinking(choice.message.reasoning_content, rawContent);
 
+  // Extract cache-hit stats. DeepSeek reports prompt_cache_hit_tokens /
+  // prompt_cache_miss_tokens; some OpenAI-compatible endpoints use
+  // prompt_tokens_details.cached_tokens instead. Handle both.
+  const usage = data.usage as
+    | (Record<string, unknown> & {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+      })
+    | undefined;
+  const details = usage?.prompt_tokens_details as { cached_tokens?: number } | undefined;
+  const hit =
+    (typeof usage?.prompt_cache_hit_tokens === "number" ? usage.prompt_cache_hit_tokens : undefined) ??
+    (typeof details?.cached_tokens === "number" ? details.cached_tokens : undefined);
+  const miss =
+    typeof usage?.prompt_cache_miss_tokens === "number" ? usage.prompt_cache_miss_tokens : undefined;
+
   return {
     message: {
       role: "assistant",
@@ -211,7 +243,13 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
     },
     finishReason: choice.finish_reason ?? "stop",
     thinking: thinking.length > 0 ? thinking : undefined,
-    usage: data.usage,
+    usage: {
+      prompt_tokens: usage?.prompt_tokens,
+      completion_tokens: usage?.completion_tokens,
+      total_tokens: usage?.total_tokens,
+      cache_hit_tokens: hit,
+      cache_miss_tokens: miss,
+    },
   };
 }
 
