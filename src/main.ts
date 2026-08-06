@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { Notice, Platform, Plugin, WorkspaceLeaf } from "obsidian";
 import { AgentSettings, AgentSettingTab, DEFAULT_SETTINGS, ensureProfiles } from "./settings";
 import { AgentChatView, VIEW_TYPE_AGENT_CHAT } from "./chatView";
 import { ensureAgentWorkspace } from "./memory";
@@ -65,6 +65,12 @@ export default class AgentPlugin extends Plugin {
   async activateView(mode: "sidebar" | "tab" = "sidebar"): Promise<void> {
     const { workspace } = this.app;
 
+    // On mobile, open as a full-screen tab by default — the side drawer
+    // only covers half the screen. Users can opt out in settings.
+    if (Platform.isMobile && this.settings.mobileFullscreen) {
+      mode = "tab";
+    }
+
     // Reuse an existing chat leaf that already lives in the requested area.
     const existing = workspace
       .getLeavesOfType(VIEW_TYPE_AGENT_CHAT)
@@ -72,12 +78,18 @@ export default class AgentPlugin extends Plugin {
 
     let leaf: WorkspaceLeaf | null | undefined = existing;
     if (!leaf) {
+      // The chat is already open in the wrong area (e.g. the mobile
+      // half-screen drawer) — move it instead of opening a duplicate.
+      const misplaced = workspace
+        .getLeavesOfType(VIEW_TYPE_AGENT_CHAT)
+        .find((l) => !this.isLeafInArea(l, mode));
       leaf =
         mode === "tab"
           ? workspace.getLeaf("tab")
           : workspace.getRightLeaf(false);
       if (leaf) {
         await leaf.setViewState({ type: VIEW_TYPE_AGENT_CHAT, active: true });
+        if (misplaced && misplaced !== leaf) misplaced.detach();
       }
     }
     if (leaf) workspace.revealLeaf(leaf);

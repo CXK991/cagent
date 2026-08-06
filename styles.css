@@ -736,3 +736,120 @@
   margin-top: 12px;
   flex-wrap: wrap;
 }
+
+/* ============================================================
+   Mobile adaptations (layout approach inspired by Copilot plugin)
+   ============================================================ */
+
+/* Reserve space for the bottom navbar + safe area so the input row is
+   never hidden behind them. */
+body.is-mobile .workspace-leaf-content[data-type="agent-tools-chat"] .view-content {
+  padding-bottom: calc(var(--safe-area-inset-bottom, 0px) + var(--size-4-1)) !important;
+}
+
+@supports selector(body:has(*)) {
+  body.is-mobile:has(.mobile-navbar):not(.is-hidden-nav)
+    .workspace-leaf-content[data-type="agent-tools-chat"]
+    .view-content {
+    padding-bottom: calc(
+      var(--navbar-height, 50px) + max(var(--safe-area-inset-bottom, 0px), var(--size-4-3)) +
+        var(--size-4-1)
+    ) !important;
+  }
+}
+
+/* Hide the chat header while the soft keyboard is open to reclaim
+   screen space (class toggled by chatView.ts). */
+body.is-mobile .agent-chat-root.keyboard-open .agent-chat-header {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Header: keep one compact row; the session dropdown shrinks and the
+     action buttons scroll horizontally if needed. */
+  .agent-chat-header {
+    gap: 4px;
+  }
+
+  .agent-chat-header-left {
+    gap: 4px;
+  }
+
+  .agent-chat-sessions {
+    max-width: 38%;
+    height: 28px;
+  }
+
+  /* Token counter is secondary on small screens. */
+  .agent-chat-usage {
+    display: none;
+  }
+
+  .agent-chat-header-actions {
+    gap: 0;
+    flex-shrink: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Comfortable touch targets. */
+  .agent-chat-icon-btn {
+    min-width: 34px;
+    min-height: 34px;
+    padding: 6px;
+  }
+
+  /* Input row: tighter frame, larger tap area. */
+  .agent-chat-input-row {
+    gap: 4px;
+    padding: 4px;
+    border-radius: 10px;
+  }
+
+  /* 16px prevents iOS Safari auto-zoom when focusing the field. */
+  .agent-chat-input {
+    min-height: 38px;
+    font-size: 16px;
+  }
+
+  .agent-chat-send {
+    padding: 10px 12px;
+  }
+
+  .agent-chat-img {
+    padding: 10px;
+  }
+
+  /* Messages: use a bit more width, slightly smaller avatar. */
+  .agent-msg-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+  }
+
+  .agent-msg-content {
+    max-width: 88%;
+  }
+
+  /* Welcome tips span the full width. */
+  .agent-welcome-tips {
+    max-width: 100%;
+  }
+
+  /* Floating "back to latest" sits above the input row. */
+  .agent-to-bottom {
+    right: 12px;
+    bottom: 76px;
+  }
+}
+
+/* Touch devices: hover states shouldn't be the only affordance. */
+@media (hover: none) {
+  .agent-chat-icon-btn:hover,
+  .agent-chat-img:hover,
+  .agent-msg-action:hover,
+  .agent-session-btn:hover {
+    background: transparent;
+  }
+}

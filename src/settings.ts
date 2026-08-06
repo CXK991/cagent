@@ -61,6 +61,8 @@ export interface AgentSettings {
   maxIterations: number;
   unlimitedIterations: boolean;
   openMode: "sidebar" | "tab";
+  /** On phones, always open the chat as a full-screen tab (no half-screen drawer). */
+  mobileFullscreen: boolean;
   requireConsent: boolean;
   truncateEnabled: boolean;
   truncateMaxLines: number;
@@ -107,6 +109,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxIterations: 10,
   unlimitedIterations: false,
   openMode: "sidebar",
+  mobileFullscreen: true,
   requireConsent: true,
   truncateEnabled: true,
   truncateMaxLines: 200,
@@ -438,13 +441,23 @@ export class AgentSettingTab extends PluginSettingTab {
       .setDesc(this.tr("openModeDesc"))
       .addDropdown((d) =>
         d
-          .addOption("sidebar", this.tr("sidebar"))
-          .addOption("tab", this.tr("tab"))
+          .addOption("sidebar", this.tr("halfScreen"))
+          .addOption("tab", this.tr("fullScreen"))
           .setValue(this.plugin.settings.openMode)
           .onChange(async (v) => {
             this.plugin.settings.openMode = v as "sidebar" | "tab";
             await this.plugin.saveSettings();
           })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("mobileFullscreen"))
+      .setDesc(this.tr("mobileFullscreenDesc"))
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.mobileFullscreen).onChange(async (v) => {
+          this.plugin.settings.mobileFullscreen = v;
+          await this.plugin.saveSettings();
+        })
       );
 
     const sliderSetting = new Setting(containerEl)

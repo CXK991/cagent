@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Menu, Notice, TFile, WorkspaceLeaf, normalizePath, setIcon } from "obsidian";
+import { ItemView, MarkdownRenderer, Menu, Notice, Platform, TFile, WorkspaceLeaf, normalizePath, setIcon } from "obsidian";
 import { ObsidianAgent } from "./agent";
 import { truncateText } from "./tools";
 import { SessionStore } from "./sessions";
@@ -52,6 +52,9 @@ export class AgentChatView extends ItemView {
 
   // Pending image attachments (sent as message bubbles, not pasted text).
   private pendingImages: Array<{ data: string; name: string }> = [];
+  // Mobile: observes the soft-keyboard height so the header can hide and
+  // the input stays visible (inspired by Copilot's mobile handling).
+  private keyboardObserver?: MutationObserver;
   private previewRow?: HTMLElement;
 
   // Time grouping: only show a timestamp if it differs from the previous one
@@ -77,6 +80,22 @@ export class AgentChatView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("agent-chat-root");
+
+    // Mobile: hide the header while the soft keyboard is open to reclaim
+    // screen space. Obsidian sets --keyboard-height on <html> while typing.
+    if (Platform.isMobile) {
+      const docEl = this.app.workspace.containerEl.doc.documentElement;
+      const applyKeyboardClass = () => {
+        const h = parseFloat(docEl.style.getPropertyValue("--keyboard-height") || "0");
+        root.toggleClass("keyboard-open", h > 0);
+      };
+      applyKeyboardClass();
+      this.keyboardObserver = new MutationObserver(applyKeyboardClass);
+      this.keyboardObserver.observe(docEl, {
+        attributes: true,
+        attributeFilter: ["style"],
+      });
+    }
 
     // Header: session picker + context usage (left) + actions (right).
     const header = root.createDiv({ cls: "agent-chat-header" });
@@ -1019,5 +1038,8 @@ export class AgentChatView extends ItemView {
     }
   }
 
-  async onClose(): Promise<void> { /* nothing to clean */ }
+  async onClose(): Promise<void> {
+    this.keyboardObserver?.disconnect();
+    this.keyboardObserver = undefined;
+  }
 }

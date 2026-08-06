@@ -142,10 +142,14 @@ const zh = {
   switchModel: "切换模型",
   switchedTo: "已切换到：{name}",
 
-  openMode: "对话打开方式",
-  openModeDesc: "左侧栏图标点击后在哪里打开对话。两个命令始终可用。",
+  openMode: "对话打开方式（半屏 / 全屏）",
+  openModeDesc: "打开聊天时的显示方式：半屏（侧边栏）或全屏（标签页）。两个命令始终可用。",
   sidebar: "侧边栏（右侧栏）",
   tab: "独立标签页（主区域）",
+  halfScreen: "半屏（侧边栏）",
+  fullScreen: "全屏（标签页）",
+  mobileFullscreen: "移动端始终全屏",
+  mobileFullscreenDesc: "手机上打开聊天时强制使用全屏标签页，避免半屏抽屉。关闭后手机端也会按上面的方式打开。",
 
   maxIterations: "最大工具调用轮数",
   maxIterationsDesc: "每条用户消息允许的工具调用轮数上限。",
@@ -306,10 +310,14 @@ const en: Record<Key, string> = {
   switchModel: "Switch model",
   switchedTo: "Switched to: {name}",
 
-  openMode: "Chat open mode",
-  openModeDesc: "Where the ribbon icon opens the agent chat. Both commands stay available regardless.",
+  openMode: "Chat open mode (half / full screen)",
+  openModeDesc: "How the chat opens: half-screen sidebar or full-screen tab. Both commands stay available regardless.",
   sidebar: "Sidebar (right dock)",
   tab: "Standalone tab (main area)",
+  halfScreen: "Half screen (sidebar)",
+  fullScreen: "Full screen (tab)",
+  mobileFullscreen: "Always full screen on mobile",
+  mobileFullscreenDesc: "Force the full-screen tab on phones instead of the half-screen drawer. Turn off to follow the mode above on mobile too.",
 
   maxIterations: "Max tool iterations",
   maxIterationsDesc: "Safety cap on tool-call rounds per user message.",
