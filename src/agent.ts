@@ -2,7 +2,7 @@
 // until the model answers with plain text or max iterations is reached.
 
 import { App } from "obsidian";
-import { chatCompletion, sanitizeMessages, ChatMessage } from "./openai";
+import { applySlidingWindow, chatCompletion, compactToolRounds, sanitizeMessages, ChatMessage } from "./openai";
 import { buildObsidianTools, Tool } from "./tools";
 import { ensureAgentWorkspace, loadMemory, listSkills } from "./memory";
 import { validateArgs } from "./validate";
@@ -115,7 +115,14 @@ export class ObsidianAgent {
   ): Promise<ChatMessage[]> {
     // Sanitize the history first: drop orphan tool messages and trim any
     // incomplete trailing tool round that would cause a provider 400.
-    const cleanHistory = sanitizeMessages(history);
+    let cleanHistory = sanitizeMessages(history);
+    // Compact past tool rounds (drop tool messages + tool_calls, keep text).
+    // Saves tokens and keeps the cache prefix stable.
+    if (this.settings.compactToolRounds !== false) {
+      cleanHistory = compactToolRounds(cleanHistory);
+    }
+    // Optional sliding window: only the last N messages are sent.
+    cleanHistory = applySlidingWindow(cleanHistory, this.settings.maxContextMessages ?? 0);
 
     const messages: ChatMessage[] = [
       { role: "system", content: await buildSystemPrompt(this.app, this.settings.systemPromptOverride) },

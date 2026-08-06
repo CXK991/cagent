@@ -158,6 +158,13 @@ const zh = {
   maxLines: "单次读取最大行数",
   maxLinesDesc: "截断阈值：工具每次调用最多返回这些行（10–2000）。",
 
+  secContext: "上下文管理",
+  compactToolRounds: "精简工具调用记录",
+  compactToolRoundsDesc: "发送时丢弃历史里的工具调用消息（只留最终文字）。工具结果往往是大头，精简后省 token 且不影响缓存命中。",
+  maxContext: "滑动窗口：保留最近消息数",
+  maxContextDesc: "只发送最近 N 条消息，更早的丢弃。设为 0 关闭。注意：开启会降低 Prompt 缓存命中率（前缀频繁变化），仅在上下文过大时使用。",
+  off: "关闭",
+
   // Commands / ribbon
   openSidebar: "在侧边栏打开 Cagent 对话",
   openTab: "在新标签页打开 Cagent 对话",
@@ -314,6 +321,13 @@ const en: Record<Key, string> = {
   truncateDesc: "Limit how much of a file the agent uploads in one tool call. Turn off to always send full content (may exceed context or cost more tokens).",
   maxLines: "Max lines per read",
   maxLinesDesc: "Line threshold for truncation: tools return at most this many lines per call (10–2000).",
+
+  secContext: "Context management",
+  compactToolRounds: "Compact tool-call records",
+  compactToolRoundsDesc: "Drop past tool messages from what's sent (keep only final text). Tool results are usually the biggest chunk — compacting saves tokens without hurting cache hits.",
+  maxContext: "Sliding window: keep last N messages",
+  maxContextDesc: "Only send the most recent N messages, drop older ones. 0 = off. Note: enabling this lowers the prompt-cache hit rate (the prefix changes often); use only if the context is too large.",
+  off: "Off",
 
   openSidebar: "Open Cagent chat in sidebar",
   openTab: "Open Cagent chat in a new tab",

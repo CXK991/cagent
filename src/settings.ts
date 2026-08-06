@@ -46,6 +46,12 @@ export interface AgentSettings {
   thinkingCollapsed: boolean;
   /** Whether tool-call activity is shown in chat. */
   showToolCalls: boolean;
+  /** Drop past tool messages + tool_calls from what's sent to the API.
+   * Saves tokens, cache-friendly; the model only needs the final text. */
+  compactToolRounds: boolean;
+  /** Sliding window: only the last N messages are sent. 0 = off.
+   * NOTE: trades prompt-cache hit rate for token savings. */
+  maxContextMessages: number;
   /** Auto-scroll to the newest message. */
   autoScroll: boolean;
   /** Custom avatar text (emoji or short text) for the user. */
@@ -92,7 +98,9 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   maxTokens: 4096,
   systemPromptOverride: "",
   thinkingCollapsed: true,
-  showToolCalls: true,
+  showToolCalls: false,
+  compactToolRounds: true,
+  maxContextMessages: 0,
   autoScroll: true,
   userAvatar: "🧑",
   aiAvatar: "🤖",
@@ -502,6 +510,39 @@ export class AgentSettingTab extends PluginSettingTab {
         s.sliderEl.addClass("agent-slider");
       });
     linesSetting.setDisabled(!this.plugin.settings.truncateEnabled);
+
+    // ---- Context management ----
+    this.section(containerEl, this.tr("secContext"));
+
+    new Setting(containerEl)
+      .setName(this.tr("compactToolRounds"))
+      .setDesc(this.tr("compactToolRoundsDesc"))
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.compactToolRounds).onChange(async (v) => {
+          this.plugin.settings.compactToolRounds = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    const winValueEl = containerEl.createSpan({
+      cls: "agent-slider-value",
+      text: this.plugin.settings.maxContextMessages === 0
+        ? this.tr("off")
+        : String(this.plugin.settings.maxContextMessages),
+    });
+    new Setting(containerEl)
+      .setName(this.tr("maxContext"))
+      .setDesc(this.tr("maxContextDesc"))
+      .addSlider((s) => {
+        s.setLimits(0, 200, 10)
+          .setValue(this.plugin.settings.maxContextMessages)
+          .onChange(async (v) => {
+            this.plugin.settings.maxContextMessages = v;
+            winValueEl.setText(v === 0 ? this.tr("off") : String(v));
+            await this.plugin.saveSettings();
+          });
+        s.sliderEl.addClass("agent-slider");
+      });
 
     // ---- Chat display ----
     this.section(containerEl, this.tr("secChat"));

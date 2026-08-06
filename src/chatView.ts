@@ -364,6 +364,7 @@ export class AgentChatView extends ItemView {
   private renderHistory(): void {
     this.messagesEl.empty();
     this.bubbles = [];
+    const showTools = this.plugin.settings.showToolCalls !== false;
     for (const m of this.history) {
       if (m.role === "user" && (m.content || m.images)) {
         // Strip the injected referenced-files block for display.
@@ -376,19 +377,26 @@ export class AgentChatView extends ItemView {
         }
       } else if (m.role === "assistant" && m.content) {
         this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
-      } else if (m.role === "tool") {
+      } else if (m.role === "tool" && showTools) {
         const short = m.content && m.content.length > 200 ? m.content.slice(0, 200) + "…" : m.content ?? "";
         this.addBubble("agent-msg-tool-result", `↳ ${m.name}: ${short}`);
       }
     }
   }
 
-  /** Rough token estimate of the context window: chars / 4 (incl. system prompt allowance). */
+  /** Rough token estimate of what is actually SENT: chars / 4, mirroring the
+   * compaction + sliding-window applied in agent.run. */
   private estimateContextTokens(): number {
     let chars = 4000; // system prompt + memory + tool schemas allowance
-    for (const m of this.history) {
-      chars += (m.content?.length ?? 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0);
+    const s = this.plugin.settings;
+    let msgs = this.history;
+    if (s.compactToolRounds !== false) {
+      msgs = msgs.filter((m) => m.role !== "tool" && (m.role !== "assistant" || !!m.content?.trim()));
     }
+    if ((s.maxContextMessages ?? 0) > 0 && msgs.length > s.maxContextMessages) {
+      msgs = msgs.slice(-s.maxContextMessages);
+    }
+    for (const m of msgs) chars += m.content?.length ?? 0;
     return Math.round(chars / 4);
   }
 

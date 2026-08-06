@@ -77,6 +77,35 @@ export function sanitizeMessages(messages: ChatMessage[]): ChatMessage[] {
   return out;
 }
 
+/**
+ * Drop past tool-call machinery from history that's about to be sent: remove
+ * `role: "tool"` messages and strip `tool_calls` from assistant messages,
+ * keeping only the assistant's final text (and all user text). Tool results are
+ * often huge (file dumps, search output) yet the model no longer needs them
+ * once a round completes. Deterministic per send, so the cache prefix stays
+ * stable across requests.
+ */
+export function compactToolRounds(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (m.role === "tool") continue;
+    if (m.role === "assistant") {
+      const text = m.content?.trim();
+      if (!text) continue; // silent assistant (pure tool_calls or empty)
+      out.push({ ...m, tool_calls: undefined });
+    } else {
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+/** Keep only the last `max` messages. `max <= 0` means no limit. */
+export function applySlidingWindow(messages: ChatMessage[], max: number): ChatMessage[] {
+  if (max <= 0 || messages.length <= max) return messages;
+  return messages.slice(-max);
+}
+
 export interface ToolCall {
   id: string;
   type: "function";
