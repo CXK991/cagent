@@ -1,5 +1,5 @@
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
-import { AgentSettings, AgentSettingTab, DEFAULT_SETTINGS } from "./settings";
+import { AgentSettings, AgentSettingTab, DEFAULT_SETTINGS, ensureProfiles } from "./settings";
 import { AgentChatView, VIEW_TYPE_AGENT_CHAT } from "./chatView";
 import { ensureAgentWorkspace } from "./memory";
 import { ConsentManager } from "./consent";
@@ -95,6 +95,8 @@ export default class AgentPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Seed/migrate model profiles (old data has no profiles array).
+    ensureProfiles(this.settings);
   }
 
   async saveSettings(): Promise<void> {

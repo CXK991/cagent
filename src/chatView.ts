@@ -1,9 +1,10 @@
-import { ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, normalizePath, setIcon } from "obsidian";
+import { ItemView, MarkdownRenderer, Menu, Notice, TFile, WorkspaceLeaf, normalizePath, setIcon } from "obsidian";
 import { ObsidianAgent } from "./agent";
 import { truncateText } from "./tools";
 import { SessionStore } from "./sessions";
 import { visionDescribe, type ChatMessage } from "./openai";
 import { t, type Key } from "./i18n";
+import { syncActiveProfile } from "./settings";
 import { SessionManagerModal, ConfirmModal } from "./sessionModal";
 import type AgentPlugin from "./main";
 
@@ -94,6 +95,16 @@ export class AgentChatView extends ItemView {
       b.addEventListener("click", cb);
       return b;
     };
+
+    // Model switcher: lists saved profiles; grayed out for those without a key.
+    const modelBtn = actions.createEl("button", {
+      cls: "agent-chat-icon-btn",
+      attr: { "aria-label": this.tr("switchModel") },
+    });
+    setIcon(modelBtn, "bot");
+    modelBtn.setAttr("title", this.currentProfileLabel());
+    modelBtn.addEventListener("click", (ev) => this.showProfileMenu(modelBtn, ev));
+    actions.prepend(modelBtn);
 
     mkBtn("search", this.tr("searchOpen"), () => this.toggleSearch());
     mkBtn("list", this.tr("sessionManagerTitle"), () => {
@@ -307,6 +318,36 @@ export class AgentChatView extends ItemView {
       if (s.id === this.sessionId) continue;
       sel.createEl("option", { text: s.title, value: s.id });
     }
+  }
+
+  /** Label for the model switcher button tooltip (active profile name + model). */
+  private currentProfileLabel(): string {
+    const p = this.plugin.settings.profiles.find((x) => x.id === this.plugin.settings.activeProfileId);
+    if (!p) return this.tr("switchModel");
+    return `${p.name || this.tr("unnamedProfile")}${p.model ? " · " + p.model : ""}`;
+  }
+
+  /** Popup menu listing saved profiles; grayed out when no API key is set. */
+  private showProfileMenu(btn: HTMLElement, ev: MouseEvent): void {
+    const s = this.plugin.settings;
+    const menu = new Menu();
+    for (const p of s.profiles) {
+      const label = `${p.name || this.tr("unnamedProfile")}${p.model ? " · " + p.model : ""}`;
+      menu.addItem((item) => {
+        item.setTitle(label);
+        if (p.id === s.activeProfileId) item.setChecked(true);
+        if (!p.apiKey.trim()) item.setDisabled(true);
+        item.onClick(async () => {
+          if (p.id === s.activeProfileId) return;
+          s.activeProfileId = p.id;
+          syncActiveProfile(s);
+          await this.plugin.saveSettings();
+          btn.setAttr("title", this.currentProfileLabel());
+          new Notice(this.tr("switchedTo", { name: p.name || this.tr("unnamedProfile") }));
+        });
+      });
+    }
+    menu.showAtMouseEvent(ev);
   }
 
   private loadSession(id: string): void {

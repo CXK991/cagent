@@ -1,13 +1,30 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import { listModels } from "./openai";
+import { listModels, testConnection } from "./openai";
 import { LANG_OPTIONS, t, type Key, type Lang } from "./i18n";
 import type AgentPlugin from "./main";
 
-export interface AgentSettings {
+/** One saved model configuration: endpoint + key + model, switchable from chat. */
+export interface ModelProfile {
+  id: string;
+  /** Display name, e.g. "DeepSeek 原生" or "Coding Plan". */
+  name: string;
   baseUrl: string;
   apiKey: string;
   model: string;
-  /** Quick provider preset; "custom" = manual baseUrl/model. */
+}
+
+export interface AgentSettings {
+  /** Flat snapshot of the ACTIVE profile (kept in sync via syncActiveProfile),
+   * so the agent can keep reading live fields with no changes. */
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  /** All saved model configurations. */
+  profiles: ModelProfile[];
+  /** Which profile is currently active. */
+  activeProfileId: string;
+  /** Quick provider preset; "custom" = manual baseUrl/model. (Legacy: preset UI
+   * replaced by profiles, field kept for old data.) */
   providerPreset: string;
   /** UI language. */
   language: Lang;
@@ -61,6 +78,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   baseUrl: "",
   apiKey: "",
   model: "",
+  profiles: [],
+  activeProfileId: "",
   providerPreset: "custom",
   language: "zh",
   visionEnabled: false,
@@ -85,10 +104,43 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   truncateMaxLines: 200,
 };
 
+let profileSeq = 0;
+export function newProfileId(): string {
+  profileSeq += 1;
+  return `p-${Date.now()}-${profileSeq}`;
+}
+
+/** Copy the ACTIVE profile's fields into the flat baseUrl/apiKey/model so the
+ * agent (which reads those live) keeps working unchanged. */
+export function syncActiveProfile(s: AgentSettings): void {
+  const p = s.profiles.find((x) => x.id === s.activeProfileId);
+  if (p) {
+    s.baseUrl = p.baseUrl;
+    s.apiKey = p.apiKey;
+    s.model = p.model;
+  }
+}
+
+/** Seed/migrate profiles. Called after settings load: old data without a
+ * profiles array gets one default profile built from the legacy flat fields. */
+export function ensureProfiles(s: AgentSettings): void {
+  if (!Array.isArray(s.profiles) || s.profiles.length === 0) {
+    const seed: ModelProfile = {
+      id: newProfileId(),
+      name: "默认",
+      baseUrl: s.baseUrl || PROVIDER_PRESETS[1].baseUrl,
+      apiKey: s.apiKey || "",
+      model: s.model || PROVIDER_PRESETS[1].model,
+    };
+    s.profiles = [seed];
+    s.activeProfileId = seed.id;
+  } else if (!s.profiles.some((x) => x.id === s.activeProfileId)) {
+    s.activeProfileId = s.profiles[0].id;
+  }
+  syncActiveProfile(s);
+}
+
 export class AgentSettingTab extends PluginSettingTab {
-  private fetchedModels: string[] = [];
-  private modelManual = false;
-  private autoFetched = false;
 
   constructor(app: App, private plugin: AgentPlugin) {
     super(app, plugin);
@@ -104,67 +156,135 @@ export class AgentSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { cls: "cagent-section-title", text: title });
   }
 
-  /** Model picker: dropdown populated from the endpoint's /models, with a
-   * refresh button and a manual-input fallback (openagent-style). */
-  private renderModelSetting(containerEl: HTMLElement): void {
-    const current = this.plugin.settings.model;
-    const setting = new Setting(containerEl)
-      .setName(this.tr("model"))
-      .setDesc(this.tr("modelDesc"));
+  /** Render the model-profiles manager: one editable block per saved config. */
+  private renderProfiles(containerEl: HTMLElement): void {
+    const s = this.plugin.settings;
+    if (s.profiles.length === 0) {
+      containerEl.createDiv({ cls: "cagent-muted", text: this.tr("noProfiles") });
+    }
 
-    if (this.modelManual) {
-      setting.addText((tf) =>
-        tf.setPlaceholder(this.tr("modelPlaceholder"))
-          .setValue(current)
+    for (const p of s.profiles) this.renderProfile(containerEl, p);
+
+    new Setting(containerEl)
+      .setName(this.tr("addProfile"))
+      .addButton((b) =>
+        b.setButtonText(this.tr("addProfileBtn")).setCta().onClick(async () => {
+          s.profiles.push({ id: newProfileId(), name: "", baseUrl: "", apiKey: "", model: "" });
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+  }
+
+  /** One profile: name / baseUrl / apiKey (with Test) / model + actions. */
+  private renderProfile(containerEl: HTMLElement, p: ModelProfile): void {
+    const s = this.plugin.settings;
+    const isActive = p.id === s.activeProfileId;
+
+    // Header row: name + active indicator + actions.
+    new Setting(containerEl)
+      .setName(p.name || this.tr("unnamedProfile"))
+      .setDesc(isActive ? this.tr("activeNow") : "")
+      .addExtraButton((b) =>
+        b.setIcon("check-circle")
+          .setTooltip(isActive ? this.tr("activeNow") : this.tr("setActive"))
+          .onClick(async () => {
+            if (!isActive) {
+              s.activeProfileId = p.id;
+              syncActiveProfile(s);
+              await this.plugin.saveSettings();
+              this.display();
+            }
+          })
+      )
+      .addExtraButton((b) =>
+        b.setIcon("trash")
+          .setTooltip(this.tr("deleteProfile"))
+          .onClick(async () => {
+            if (s.profiles.length <= 1) {
+              new Notice(this.tr("cannotDeleteLast"));
+              return;
+            }
+            s.profiles = s.profiles.filter((x) => x.id !== p.id);
+            if (isActive) {
+              s.activeProfileId = s.profiles[0].id;
+              syncActiveProfile(s);
+            }
+            await this.plugin.saveSettings();
+            this.display();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("profileName"))
+      .addText((t) =>
+        t.setPlaceholder(this.tr("profileNamePh"))
+          .setValue(p.name)
           .onChange(async (v) => {
-            this.plugin.settings.model = v.trim();
+            p.name = v.trim();
             await this.plugin.saveSettings();
           })
       );
-    } else {
-      setting.addDropdown((d) => {
-        const options = this.fetchedModels.includes(current)
-          ? this.fetchedModels
-          : [current, ...this.fetchedModels];
-        for (const m of options) d.addOption(m, m || this.tr("notSet"));
-        d.setValue(current).onChange(async (v) => {
-          this.plugin.settings.model = v;
+
+    new Setting(containerEl)
+      .setName(this.tr("baseUrl"))
+      .addText((t) =>
+        t.setPlaceholder("https://api.deepseek.com/v1")
+          .setValue(p.baseUrl)
+          .onChange(async (v) => {
+            p.baseUrl = v.trim();
+            if (isActive) syncActiveProfile(s);
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("apiKey"))
+      .addText((t) => {
+        t.inputEl.type = "password";
+        t.setValue(p.apiKey).onChange(async (v) => {
+          p.apiKey = v.trim();
+          if (isActive) syncActiveProfile(s);
           await this.plugin.saveSettings();
         });
-      });
-    }
+      })
+      .addExtraButton((b) =>
+        b.setIcon("puzzle")
+          .setTooltip(this.tr("testConn"))
+          .onClick(async () => {
+            new Notice(this.tr("testingConn"));
+            const r = await testConnection(p.baseUrl, p.apiKey, p.model);
+            if (r.ok) new Notice(this.tr("testOk", { model: r.message }));
+            else new Notice(this.tr("testFail") + " " + r.message);
+          })
+      );
 
-    setting.addExtraButton((b) =>
-      b.setIcon("rotate-cw")
-        .setTooltip(this.tr("fetchModels"))
-        .onClick(async () => {
-          const { baseUrl, apiKey } = this.plugin.settings;
-          if (!baseUrl) {
-            new Notice(this.tr("setBaseUrlFirst"));
-            return;
-          }
-          new Notice(this.tr("fetchingModels"));
-          const models = await listModels(baseUrl, apiKey);
-          if (models.length === 0) {
-            new Notice(this.tr("noModelsReturned"));
-            this.modelManual = true;
-          } else {
+    new Setting(containerEl)
+      .setName(this.tr("model"))
+      .addText((t) =>
+        t.setValue(p.model).onChange(async (v) => {
+          p.model = v.trim();
+          if (isActive) syncActiveProfile(s);
+          await this.plugin.saveSettings();
+        })
+      )
+      .addExtraButton((b) =>
+        b.setIcon("rotate-cw")
+          .setTooltip(this.tr("fetchModels"))
+          .onClick(async () => {
+            new Notice(this.tr("fetchingModels"));
+            const models = await listModels(p.baseUrl, p.apiKey);
+            if (models.length === 0) {
+              new Notice(this.tr("noModelsReturned"));
+              return;
+            }
+            p.model = models.includes(p.model) ? p.model : models[0];
+            if (isActive) syncActiveProfile(s);
+            await this.plugin.saveSettings();
             new Notice(this.tr("foundModels", { n: models.length }));
-            this.fetchedModels = models;
-            this.modelManual = false;
-          }
-          this.display();
-        })
-    );
-
-    setting.addExtraButton((b) =>
-      b.setIcon(this.modelManual ? "list" : "pencil")
-        .setTooltip(this.modelManual ? this.tr("switchToDropdown") : this.tr("switchToManual"))
-        .onClick(() => {
-          this.modelManual = !this.modelManual;
-          this.display();
-        })
-    );
+            this.display();
+          })
+      );
   }
 
   display(): void {
@@ -186,49 +306,9 @@ export class AgentSettingTab extends PluginSettingTab {
         });
       });
 
-    // ---- Main (text) model ----
-    this.section(containerEl, this.tr("secTextModel"));
-
-    // Provider preset: quickly fill baseUrl + model.
-    new Setting(containerEl)
-      .setName(this.tr("provider"))
-      .setDesc(this.tr("providerDesc"))
-      .addDropdown((d) => {
-        for (const p of PROVIDER_PRESETS) d.addOption(p.id, p.label);
-        d.setValue(this.plugin.settings.providerPreset).onChange(async (v) => {
-          const preset = PROVIDER_PRESETS.find((p) => p.id === v);
-          if (preset) {
-            this.plugin.settings.providerPreset = preset.id;
-            this.plugin.settings.baseUrl = preset.baseUrl;
-            this.plugin.settings.model = preset.model;
-            await this.plugin.saveSettings();
-            this.display();
-          }
-        });
-      });
-
-    new Setting(containerEl)
-      .setName(this.tr("baseUrl"))
-      .setDesc(this.tr("baseUrlDesc"))
-      .addText((t) =>
-        t.setValue(this.plugin.settings.baseUrl).onChange(async (v) => {
-          this.plugin.settings.baseUrl = v.trim();
-          await this.plugin.saveSettings();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName(this.tr("apiKey"))
-      .setDesc(this.tr("apiKeyDesc"))
-      .addText((t) => {
-        t.inputEl.type = "password";
-        t.setValue(this.plugin.settings.apiKey).onChange(async (v) => {
-          this.plugin.settings.apiKey = v.trim();
-          await this.plugin.saveSettings();
-        });
-      });
-
-    this.renderModelSetting(containerEl);
+    // ---- Model profiles ----
+    this.section(containerEl, this.tr("secProfiles"));
+    this.renderProfiles(containerEl);
 
     // Model parameters (temperature / max tokens).
     const tempSetting = new Setting(containerEl)
@@ -489,16 +569,5 @@ export class AgentSettingTab extends PluginSettingTab {
             new Notice(this.tr("historyCleared"));
           })
       );
-
-    // Auto-fetch the model list once when the tab opens (if possible).
-    if (!this.autoFetched && this.fetchedModels.length === 0 && this.plugin.settings.baseUrl) {
-      this.autoFetched = true;
-      void listModels(this.plugin.settings.baseUrl, this.plugin.settings.apiKey).then((models) => {
-        if (models.length > 0 && !this.modelManual) {
-          this.fetchedModels = models;
-          this.display();
-        }
-      });
-    }
   }
 }

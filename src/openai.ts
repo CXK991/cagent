@@ -279,6 +279,38 @@ export async function listModels(baseUrl: string, apiKey: string): Promise<strin
   }
 }
 
+export interface ConnectionTestResult {
+  ok: boolean;
+  /** On success: the model id. On failure: a human-readable error. */
+  message: string;
+}
+
+/**
+ * Test an API key + endpoint + model combo by making one tiny chat completion.
+ * Uses chatCompletion (which throws typed AuthError / RateLimitError /
+ * NetworkError / ProviderError) so the settings "Test" button can tell a bad
+ * key apart from a wrong URL / network problem. listModels cannot do this — it
+ * returns [] for both a bad key and a bad URL.
+ */
+export async function testConnection(baseUrl: string, apiKey: string, model: string): Promise<ConnectionTestResult> {
+  if (!apiKey.trim()) return { ok: false, message: "No API key" };
+  if (!baseUrl.trim()) return { ok: false, message: "No base URL" };
+  if (!model.trim()) return { ok: false, message: "No model" };
+  try {
+    await chatCompletion({
+      baseUrl,
+      apiKey,
+      model,
+      messages: [{ role: "user", content: "ping" }],
+      maxTokens: 8,
+      temperature: 0,
+    });
+    return { ok: true, message: model };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
 /** Build an OpenAI-style multimodal user content array with inline base64 images. */
 export function buildMultimodalContent(
   text: string,
