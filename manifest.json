@@ -1,7 +1,7 @@
 {
   "id": "cagent",
   "name": "Cagent",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "minAppVersion": "1.8.0",
   "description": "AI study assistant for desktop and mobile. Chat with your notes, snap wrong-answer photos, and edit local Markdown files with one tap. Works with DeepSeek and Qwen.",
   "author": "cxk991",

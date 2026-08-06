@@ -738,6 +738,193 @@
 }
 
 /* ============================================================
+   Visual refresh — Copilot-inspired chat look
+   ============================================================ */
+
+.agent-chat-root {
+  --cagent-shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --cagent-shadow-float: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* ---------- Message bubbles ---------- */
+
+.agent-msg {
+  gap: 10px;
+}
+
+.agent-msg-avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+  box-shadow: var(--cagent-shadow-soft);
+}
+
+.agent-msg-avatar.is-user {
+  background: color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+}
+
+.agent-msg-content {
+  border-radius: 16px;
+  padding: 10px 14px;
+  line-height: 1.65;
+  max-width: 86%;
+  box-shadow: var(--cagent-shadow-soft);
+}
+
+.agent-msg-user .agent-msg-content {
+  border-top-right-radius: 6px;
+}
+
+.agent-msg-assistant .agent-msg-content {
+  border-top-left-radius: 6px;
+  background: color-mix(in srgb, var(--background-secondary) 94%, var(--background-modifier-border) 6%);
+}
+
+.agent-msg-time {
+  margin-top: 6px;
+  font-size: 0.72em;
+  opacity: 0.55;
+}
+
+/* ---------- Header ---------- */
+
+.agent-chat-header {
+  padding-bottom: 8px;
+}
+
+.agent-chat-icon-btn {
+  border-radius: 8px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.agent-chat-icon-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* ---------- Input area ---------- */
+
+.agent-chat-input-row {
+  border-radius: 18px;
+  padding: 6px 8px;
+  box-shadow: var(--cagent-shadow-soft);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.agent-chat-input-row:focus-within {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+
+.agent-chat-input {
+  line-height: 1.5;
+}
+
+.agent-chat-send {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-shadow: var(--cagent-shadow-soft);
+  transition: filter 0.12s ease;
+}
+
+.agent-chat-send:hover {
+  filter: brightness(1.08);
+}
+
+.agent-chat-img {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+/* ---------- Collapsible panels ---------- */
+
+.agent-panel {
+  border-radius: 12px;
+}
+
+.agent-panel-header {
+  padding: 8px 12px;
+  border-radius: 12px;
+  transition: background 0.12s ease;
+}
+
+/* ---------- Code & markdown inside bubbles ---------- */
+
+.agent-msg-content.markdown-rendered pre {
+  border-radius: 10px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.agent-msg-content.markdown-rendered code {
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+.agent-msg-img {
+  border-radius: 10px;
+}
+
+/* ---------- Welcome ---------- */
+
+.agent-welcome-logo {
+  background: linear-gradient(
+    135deg,
+    var(--interactive-accent),
+    color-mix(in srgb, var(--interactive-accent) 60%, var(--text-accent))
+  );
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+.agent-welcome-tip {
+  border-radius: 12px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+@media (hover: hover) {
+  .agent-welcome-tip:hover {
+    border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+    transform: translateY(-1px);
+  }
+}
+
+/* ---------- Floating button ---------- */
+
+.agent-to-bottom {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--interactive-accent) 35%, rgba(0, 0, 0, 0.2));
+}
+
+/* ---------- Misc ---------- */
+
+.agent-suggest {
+  border-radius: 12px;
+  box-shadow: var(--cagent-shadow-float);
+}
+
+.agent-suggest-item.is-active {
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.agent-chat-search {
+  border-radius: 10px;
+}
+
+.agent-preview-thumb {
+  border-radius: 10px;
+}
+
+
+/* ============================================================
    Mobile adaptations (layout approach inspired by Copilot plugin)
    ============================================================ */
 
@@ -804,7 +991,7 @@ body.is-mobile .agent-chat-root.keyboard-open .agent-chat-header {
   .agent-chat-input-row {
     gap: 4px;
     padding: 4px;
-    border-radius: 10px;
+    border-radius: 14px;
   }
 
   /* 16px prevents iOS Safari auto-zoom when focusing the field. */
@@ -813,13 +1000,6 @@ body.is-mobile .agent-chat-root.keyboard-open .agent-chat-header {
     font-size: 16px;
   }
 
-  .agent-chat-send {
-    padding: 10px 12px;
-  }
-
-  .agent-chat-img {
-    padding: 10px;
-  }
 
   /* Messages: use a bit more width, slightly smaller avatar. */
   .agent-msg-avatar {
