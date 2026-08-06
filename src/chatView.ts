@@ -108,12 +108,6 @@ export class AgentChatView extends ItemView {
     this.usageEl = left.createSpan({ cls: "agent-chat-usage", text: "context ≈ 0 tok" });
 
     const actions = header.createDiv({ cls: "agent-chat-header-actions" });
-    const mkBtn = (icon: string, label: string, cb: () => void): HTMLButtonElement => {
-      const b = actions.createEl("button", { cls: "agent-chat-icon-btn", attr: { "aria-label": label } });
-      setIcon(b, icon);
-      b.addEventListener("click", cb);
-      return b;
-    };
 
     // Model switcher: lists saved profiles; grayed out for those without a key.
     const modelBtn = actions.createEl("button", {
@@ -125,13 +119,43 @@ export class AgentChatView extends ItemView {
     modelBtn.addEventListener("click", (ev) => this.showProfileMenu(modelBtn, ev));
     actions.prepend(modelBtn);
 
-    mkBtn("search", this.tr("searchOpen"), () => this.toggleSearch());
-    mkBtn("list", this.tr("sessionManagerTitle"), () => {
-      new SessionManagerModal(this.app, this.plugin, (id) => this.loadSession(id), () => this.resetConversation()).open();
+    // "More" menu: secondary actions tucked away so the header stays clean.
+    const moreBtn = actions.createEl("button", {
+      cls: "agent-chat-icon-btn",
+      attr: { "aria-label": this.tr("moreActions") },
     });
-    mkBtn("download", this.tr("exportSession"), () => void this.exportSession());
-    mkBtn("trash", this.tr("clearCurrent"), () => this.clearCurrentSession());
-    mkBtn("rotate-ccw", this.tr("newConversation"), () => this.resetConversation());
+    setIcon(moreBtn, "more-horizontal");
+    moreBtn.addEventListener("click", (ev) => {
+      const menu = new Menu();
+      menu.addItem((item) => {
+        item.setTitle(this.tr("newConversation"));
+        item.setIcon("rotate-ccw");
+        item.onClick(() => this.resetConversation());
+      });
+      menu.addItem((item) => {
+        item.setTitle(this.tr("searchOpen"));
+        item.setIcon("search");
+        item.onClick(() => this.toggleSearch());
+      });
+      menu.addItem((item) => {
+        item.setTitle(this.tr("sessionManagerTitle"));
+        item.setIcon("list");
+        item.onClick(() => {
+          new SessionManagerModal(this.app, this.plugin, (id) => this.loadSession(id), () => this.resetConversation()).open();
+        });
+      });
+      menu.addItem((item) => {
+        item.setTitle(this.tr("exportSession"));
+        item.setIcon("download");
+        item.onClick(() => void this.exportSession());
+      });
+      menu.addItem((item) => {
+        item.setTitle(this.tr("clearCurrent"));
+        item.setIcon("trash");
+        item.onClick(() => this.clearCurrentSession());
+      });
+      menu.showAtMouseEvent(ev);
+    });
 
     // In-chat search bar (hidden by default).
     this.searchRow = root.createDiv({ cls: "agent-chat-search" });
@@ -158,8 +182,9 @@ export class AgentChatView extends ItemView {
 
     this.messagesEl = root.createDiv({ cls: "agent-chat-messages" });
 
-    // Floating "back to latest" button — shows when scrolled away from bottom.
-    const toBottomBtn = root.createEl("button", { cls: "agent-to-bottom" });
+    // Floating "back to latest" button — anchored inside the message list so
+    // it never overlaps the input row.
+    const toBottomBtn = this.messagesEl.createEl("button", { cls: "agent-to-bottom" });
     setIcon(toBottomBtn, "down-to-line");
     toBottomBtn.style.display = "none";
     toBottomBtn.setAttr("aria-label", this.tr("toLatest"));
