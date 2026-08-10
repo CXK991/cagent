@@ -63,6 +63,12 @@ export interface AgentSettings {
   openMode: "sidebar" | "tab";
   /** On phones, always open the chat as a full-screen tab (no half-screen drawer). */
   mobileFullscreen: boolean;
+  /** Directory for AI-generated diagrams (SVG / excalidraw / notes). */
+  diagramDir: string;
+  /** Default format for block / signal-flow diagrams. */
+  diagramFormat: "mermaid" | "excalidraw";
+  /** Append the diagram note into the currently open note. */
+  autoInsertDiagram: boolean;
   requireConsent: boolean;
   truncateEnabled: boolean;
   truncateMaxLines: number;
@@ -110,6 +116,9 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   unlimitedIterations: false,
   openMode: "sidebar",
   mobileFullscreen: true,
+  diagramDir: "Cagent-Diagrams",
+  diagramFormat: "mermaid",
+  autoInsertDiagram: true,
   requireConsent: true,
   truncateEnabled: true,
   truncateMaxLines: 200,
@@ -456,6 +465,42 @@ export class AgentSettingTab extends PluginSettingTab {
       .addToggle((tg) =>
         tg.setValue(this.plugin.settings.mobileFullscreen).onChange(async (v) => {
           this.plugin.settings.mobileFullscreen = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    // ---- Diagram tool ----
+    this.section(containerEl, this.tr("secDiagram"));
+    new Setting(containerEl)
+      .setName(this.tr("diagramDir"))
+      .setDesc(this.tr("diagramDirDesc"))
+      .addText((txt) =>
+        txt.setValue(this.plugin.settings.diagramDir).onChange(async (v) => {
+          this.plugin.settings.diagramDir = v.trim() || "Cagent-Diagrams";
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("diagramFormat"))
+      .setDesc(this.tr("diagramFormatDesc"))
+      .addDropdown((d) =>
+        d
+          .addOption("mermaid", this.tr("formatMermaid"))
+          .addOption("excalidraw", this.tr("formatExcalidraw"))
+          .setValue(this.plugin.settings.diagramFormat)
+          .onChange(async (v) => {
+            this.plugin.settings.diagramFormat = v as "mermaid" | "excalidraw";
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(this.tr("autoInsertDiagram"))
+      .setDesc(this.tr("autoInsertDiagramDesc"))
+      .addToggle((tg) =>
+        tg.setValue(this.plugin.settings.autoInsertDiagram).onChange(async (v) => {
+          this.plugin.settings.autoInsertDiagram = v;
           await this.plugin.saveSettings();
         })
       );

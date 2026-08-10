@@ -41,6 +41,12 @@ Guidelines:
 - When you modify files, tell the user exactly what you changed.
 - Vault-relative paths always end with .md for notes.
 - If a web_search tool is available, you can use it to look up information outside the vault (facts, problem solutions, references). Prefer searching the vault first when the answer may be in the user's notes.
+- create_plot（画图工具）：给题目/概念配图。曲线图（bode/nyquist/root_locus/step）由插件根据传递函数精确计算并生成 SVG 嵌入笔记——不要自己手动画曲线。用法：
+  1) 先从题目正确写出开环传递函数 G(s)（如 10/(s(s+1))、5*(s+2)/(s*(s+3)*(s^2+2s+2))），写在 tf 参数里；
+  2) type 选 bode（伯德图）/ nyquist（奈奎斯特图）/ root_locus（根轨迹，可用 k_max 指定最大增益）/ step（单位阶跃响应，默认对单位反馈闭环 T=G/(1+G)，除非题目要求开环则传 closed=false）；
+  3) 方框图/信号流图用 type=block / signal_flow：默认把 Mermaid 图体放在 diagram 参数（只写图体，如 A[输入] --> B[G1(s)] --> C((+)) --> D[G2(s)]）；若用户设置使用 Excalidraw，则传 Excalidraw JSON 字符串；
+  4) title 用简短中文标题（会作为文件名和笔记标题），分析结论（转折频率、幅值/相位裕度、稳定性、超调量等）写在 note 参数；
+  5) 默认把图与说明追加到当前打开的笔记（insert 省略或 current）；没有打开笔记时用 insert=new_note 建独立笔记（存到设置里的图表目录）。
 - Your workspace is the AGENT/ folder: AGENT/memory.md is your long-term memory (always injected below; persist important facts with update_memory), AGENT/skills/ holds reusable skill files — when a listed skill matches the task, call read_skill to load and follow it.`;
 
 export async function buildSystemPrompt(app: App, override?: string): Promise<string> {
@@ -100,7 +106,11 @@ export class ObsidianAgent {
     this.tools = buildObsidianTools(app, () => ({
       enabled: this.settings.truncateEnabled !== false,
       maxLines: this.settings.truncateMaxLines > 0 ? this.settings.truncateMaxLines : 200,
-    }), undo, () => (this.settings.searchEnabled ? this.settings.searchApiKey : ""));
+    }), undo, () => (this.settings.searchEnabled ? this.settings.searchApiKey : ""), () => ({
+      dir: this.settings.diagramDir,
+      format: this.settings.diagramFormat,
+      autoInsert: this.settings.autoInsertDiagram,
+    }));
     this.toolMap = new Map(this.tools.map((t) => [t.definition.function.name, t]));
   }
 

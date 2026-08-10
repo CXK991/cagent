@@ -4,6 +4,8 @@
 import { App, MarkdownView, TFile, TFolder, normalizePath, parseYaml, requestUrl, stringifyYaml } from "obsidian";
 import type { ToolDefinition } from "./openai";
 import { appendMemory, loadMemory, listSkills, readSkill } from "./memory";
+import { bodeData, closedLoop, nyquistData, parseTF, rootLocusData, stepData } from "./control";
+import { svgBode, svgNyquist, svgRootLocus, svgStep } from "./plots";
 import type { UndoManager } from "./undo";
 
 /** Rejects paths that escape the vault or touch Obsidian internals. */
@@ -118,6 +120,7 @@ export interface Tool {
 /** Tools that change state and therefore require user consent. */
 const MUTATING_TOOLS = new Set([
   "create_note",
+  "create_plot",
   "append_to_note",
   "overwrite_note",
   "delete_file",
@@ -176,7 +179,8 @@ export function buildObsidianTools(
   app: App,
   getTruncate: () => TruncateConfig = () => DEFAULT_TRUNCATE,
   undo?: UndoManager,
-  searchApiKey?: () => string
+  searchApiKey?: () => string,
+  getDiagram?: () => { dir: string; format: string; autoInsert: boolean }
 ): Tool[] {
   const vault = app.vault;
 
@@ -303,6 +307,91 @@ export function buildObsidianTools(
       }
     ),
 
+    // ---------- Control-systems plotting ----------
+    tool(
+      "create_plot",
+      "Draw engineering/control-systems plots as SVG images in the vault and optionally write a note with the embedded image. Supports Bode diagram, Nyquist diagram, root locus, unit step response, and structural diagrams (block diagram / signal-flow graph via Mermaid or Excalidraw). Curves are computed exactly from the transfer function — never hand-draw them. Use open-loop G(s) for bode/nyquist/root_locus; step uses the unit-feedback closed loop T=G/(1+G) unless closed=false.",
+      {
+        type: str("Plot type: bode | nyquist | root_locus | step | block | signal_flow"),
+        tf: str("Transfer function as a rational expression of s, e.g. 10/(s(s+1)) or (s+2)/(s^2+2s+5). Required for bode/nyquist/root_locus/step."),
+        title: str("Short title for the file name and heading, e.g. 例3-伯德图"),
+        note: str("Optional markdown analysis to include under the image (corner frequencies, margins, stability conclusion)"),
+        closed: { type: "boolean", description: "For step only: wrap G in unit feedback T=G/(1+G) first (default true)" },
+        k_max: { type: "number", description: "For root_locus: maximum K to sweep (default 100)" },
+        diagram: str("For block or signal_flow: Mermaid graph body (no fences), or an Excalidraw JSON string"),
+        insert: str("Where to put the result: new_note (default) creates a note in the diagram folder, current appends to the active note, none only saves the image"),
+      },
+      ["type", "title"],
+      async ({ type, tf, title, note, closed, k_max, diagram, insert }) => {
+        const dirCfg = getDiagram ? getDiagram() : { dir: "Cagent-Diagrams", format: "mermaid" };
+        const dir = safeVaultPath(dirCfg.dir || "Cagent-Diagrams");
+        const t = String(type || "").toLowerCase();
+        const titleS = String(title || "diagram");
+        const slug = titleS.replace(/[\\/:*?"<>|#^\[\]]/g, "_").replace(/\s+/g, "-").slice(0, 60);
+        const buildNote = (embed: string): string => {
+          const n = note !== undefined && String(note).trim().length > 0 ? "\n\n" + String(note).trim() + "\n" : "\n";
+          return `# ${titleS}\n\n${embed}${n}`;
+        };
+        const ensureDir = async (): Promise<void> => {
+          if (!vault.getAbstractFileByPath(dir)) await vault.createFolder(dir);
+        };
+        const writeResult = async (content: string, suffix: string) => {
+          const autoIns = (dirCfg as { autoInsert?: boolean }).autoInsert ?? false;
+          const mode = String(insert || (autoIns ? "current" : "new_note"));
+          if (mode === "current") {
+            const active = app.workspace.getActiveFile();
+            if (!active) return err("No active note to append to; use insert=new_note");
+            const before = await vault.read(active);
+            const add = "\n\n" + content.trim() + "\n";
+            await vault.append(active, add);
+            snapshot({ tool: "create_plot", path: active.path, before, after: before + add });
+            return { note_path: active.path, appended: true };
+          }
+          const notePath = `${dir}/${slug}-${suffix}.md`;
+          if (vault.getAbstractFileByPath(notePath)) return err(`Already exists: ${notePath} — pick a different title or delete it`);
+          await vault.create(notePath, content);
+          snapshot({ tool: "create_plot", path: notePath, before: null, after: content });
+          return { note_path: notePath, appended: false };
+        };
+        try {
+          await ensureDir();
+          if (t === "block" || t === "signal_flow") {
+            const fmt = dirCfg.format === "excalidraw" ? "excalidraw" : "mermaid";
+            if (fmt === "excalidraw" && diagram) {
+              const json = typeof diagram === "string" ? diagram : JSON.stringify(diagram);
+              JSON.parse(json); // validate before writing
+              const path = `${dir}/${slug}.excalidraw`;
+              if (vault.getAbstractFileByPath(path)) return err(`Already exists: ${path}`);
+              await vault.create(path, json);
+              const embed = `![[${path}]]`;
+              const r = await writeResult(buildNote(embed), "block");
+              return ok({ ...r, embed });
+            }
+            const md = String(diagram || "").trim().replace(/^```mermaid\s*/i, "").replace(/```\s*$/, "");
+            if (!md) return err("diagram argument is required for block/signal_flow (Mermaid source or Excalidraw JSON)");
+            const code = "```mermaid\n" + md + "\n```";
+            const r = await writeResult(buildNote(code), t);
+            return ok({ ...r, embed: "```mermaid\n" + md + "\n```" });
+          }
+          const parsed = parseTF(String(tf || ""));
+          let svg = "";
+          if (t === "bode") svg = svgBode(bodeData(parsed), titleS);
+          else if (t === "nyquist") svg = svgNyquist(nyquistData(parsed), titleS);
+          else if (t === "root_locus") svg = svgRootLocus(rootLocusData(parsed, Number(k_max) || 100), parsed, titleS);
+          else if (t === "step") {
+            const sys = closed === false ? parsed : closedLoop(parsed);
+            svg = svgStep(stepData(sys), titleS);
+          } else return err(`Unknown type: ${t} (use bode/nyquist/root_locus/step/block/signal_flow)`);
+          const imgPath = `${dir}/${slug}-${t}.svg`;
+          if (!vault.getAbstractFileByPath(imgPath)) await vault.create(imgPath, svg);
+          const embed = `![[${imgPath}]]`;
+          const r = await writeResult(buildNote(embed), t);
+          return ok({ ...r, embed, tf: String(tf), svg_path: imgPath });
+        } catch (e) { return err((e as Error).message); }
+      }
+    ),
+
+    // ---------- Vault write ----------
     // ---------- Vault write ----------
     tool(
       "create_note",
