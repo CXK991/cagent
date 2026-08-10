@@ -148,9 +148,15 @@ export function parseTF(input: string): TransferFunction {
       while (j < src.length && src[j] >= "0" && src[j] <= "9") j++;
       const n = parseInt(src.slice(i, j), 10);
       i = j;
-      const p = new Array(n + 1).fill(0);
-      p[0] = 1;
-      base = fracMul(base, { num: p, den: [1] });
+      if (Number.isNaN(n) || n < 0) throw new Error(`Bad exponent at ${i} in ${input}`);
+      // (num/den)^n - expand by repeated multiplication (handles s^n and (...)^n)
+      let pn: Poly = [1];
+      let pd: Poly = [1];
+      for (let k = 0; k < n; k++) {
+        pn = polyMul(pn, base.num);
+        pd = polyMul(pd, base.den);
+      }
+      base = { num: pn, den: pd };
     }
     return base;
   };

@@ -82,12 +82,25 @@ export function svgNyquist(pts: NyqPoint[], title = "Nyquist 图"): string {
   const W = 560, H = 520;
   const reVals = pts.map((p) => p.re);
   const imVals = pts.map((p) => p.im);
-  const span = Math.max(Math.abs(Math.min(...reVals)), Math.abs(Math.max(...reVals)), Math.abs(Math.min(...imVals)), Math.abs(Math.max(...imVals))) * 1.15 || 1;
+  const fullSpan = Math.max(Math.abs(Math.min(...reVals)), Math.abs(Math.max(...reVals)), Math.abs(Math.min(...imVals)), Math.abs(Math.max(...imVals))) || 1;
+  // Systems with integrators (pole at s=0) have |Im| -> infinity as w -> 0;
+  // a max-based span would crush the real axis into a sub-pixel vertical line.
+  // Base the scale on the median extent instead and let the tail run off-canvas
+  // (clipped), like textbook Nyquist sketches.
+  const absRe = reVals.map(Math.abs).sort((a, b) => a - b);
+  const absIm = imVals.map(Math.abs).sort((a, b) => a - b);
+  const medIdx = Math.floor(absRe.length / 2);
+  const core = Math.max(absRe[medIdx] || 0, absIm[medIdx] || 0) * 2.2 || 1;
+  const beyond = pts.filter((pt) => Math.hypot(pt.re, pt.im) > core).length / pts.length;
+  // A real tail: many points far outside the median core (integrator at s=0).
+  const span = (beyond > 0.25 && fullSpan > core * 4 ? core : fullSpan) * 1.15;
   const cx = W / 2, cy = H / 2 - 10, scale = (H / 2 - 60) / span;
   const X = (re: number) => cx + re * scale;
   const Y = (im: number) => cy - im * scale;
   let s = svgHeader(W, H);
   s += `<text x="${W / 2}" y="22" font-size="14" font-weight="600" text-anchor="middle" fill="#6b7280">${esc(title)}</text>`;
+  s += `<clipPath id="nyqClip"><rect x="20" y="30" width="${W - 40}" height="${H - 60}"/></clipPath>`;
+  s += `<g clip-path="url(#nyqClip)">`;
   // axes
   s += `<line x1="20" y1="${cy}" x2="${W - 20}" y2="${cy}" stroke="#9ca3af" stroke-opacity="0.5"/>`;
   s += `<line x1="${cx}" y1="30" x2="${cx}" y2="${H - 20}" stroke="#9ca3af" stroke-opacity="0.5"/>`;
@@ -115,6 +128,7 @@ export function svgNyquist(pts: NyqPoint[], title = "Nyquist 图"): string {
   s += `<circle cx="${start[0]}" cy="${start[1]}" r="3.5" fill="#3b82f6"/>`;
   const ang = Math.atan2(arrow[1] - start[1], arrow[0] - start[0]);
   s += `<path d="M${arrow[0]},${arrow[1]} l${(8 * Math.cos(ang + 2.6)).toFixed(1)},${(8 * Math.sin(ang + 2.6)).toFixed(1)} M${arrow[0]},${arrow[1]} l${(8 * Math.cos(ang - 2.6)).toFixed(1)},${(8 * Math.sin(ang - 2.6)).toFixed(1)}" stroke="#3b82f6" stroke-width="1.6" fill="none"/>`;
+  s += `</g>`;
   s += `<text x="${cx}" y="${H - 8}" font-size="11" text-anchor="middle" fill="#6b7280" fill-opacity="0.7">ω: 0 → ∞（实线，右侧镜像为负频率）</text>`;
   s += "</svg>";
   return s;
