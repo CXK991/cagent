@@ -482,12 +482,25 @@ export class AgentChatView extends ItemView {
     opts?: { markdown?: boolean; copyable?: boolean; ts?: number }
   ): HTMLElement {
     const el = this.messagesEl.createDiv({ cls: `agent-msg ${cls}` });
+    const isAi = cls.includes("assistant");
 
-    // Avatar: AI (assistant) or user. Uses the configured avatar text.
-    const avatar = el.createDiv({
-      cls: `agent-msg-avatar ${cls.includes("assistant") ? "is-ai" : "is-user"}`,
-      text: cls.includes("assistant") ? (this.plugin.settings.aiAvatar || "🤖") : (this.plugin.settings.userAvatar || "🧑"),
+    // Meta row: avatar + name + timestamp (Chatbox-style).
+    const meta = el.createDiv({ cls: "agent-msg-meta" });
+    const avatar = meta.createDiv({
+      cls: `agent-msg-avatar ${isAi ? "is-ai" : "is-user"}`,
+      text: isAi ? (this.plugin.settings.aiAvatar || "🤖") : (this.plugin.settings.userAvatar || "🧑"),
     });
+    meta.createSpan({
+      cls: "agent-msg-name",
+      text: isAi ? this.tr("assistantLabel") : this.tr("userLabel"),
+    });
+    if (opts?.ts && Math.abs(opts.ts - this.lastShownTs) > 5 * 60 * 1000) {
+      meta.createSpan({
+        cls: "agent-msg-time",
+        text: new Date(opts.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
+      this.lastShownTs = opts.ts;
+    }
 
     const content = el.createDiv({ cls: "agent-msg-content" });
 
@@ -498,19 +511,7 @@ export class AgentChatView extends ItemView {
       content.createSpan({ text });
     }
 
-    // Timestamp (grouped: only when it differs enough from the previous one).
-    if (opts?.ts) {
-      if (Math.abs(opts.ts - this.lastShownTs) > 5 * 60 * 1000) {
-        const time = content.createSpan({
-          cls: "agent-msg-time",
-          text: new Date(opts.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        });
-        content.addClass("has-time");
-        this.lastShownTs = opts.ts;
-      }
-    }
-
-    // Action bar: small always-visible buttons under the message (mobile-friendly).
+    // Action bar below the bubble (copy button).
     if (opts?.copyable) {
       const bar = el.createDiv({ cls: "agent-msg-actions" });
       const copyBtn = bar.createEl("button", { cls: "agent-msg-action", attr: { "aria-label": this.tr("copy") } });
@@ -565,7 +566,19 @@ export class AgentChatView extends ItemView {
   /** User message bubble: optional image thumbnails + original text. */
   private addUserBubble(images: Array<{ data: string; name: string }>, text: string, ts: number): HTMLElement {
     const el = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-user" });
-    const avatar = el.createDiv({ cls: "agent-msg-avatar is-user", text: this.plugin.settings.userAvatar || "🧑" });
+
+    // Meta row: avatar + name + timestamp.
+    const meta = el.createDiv({ cls: "agent-msg-meta" });
+    const avatar = meta.createDiv({ cls: "agent-msg-avatar is-user", text: this.plugin.settings.userAvatar || "🧑" });
+    meta.createSpan({ cls: "agent-msg-name", text: this.tr("userLabel") });
+    if (Math.abs(ts - this.lastShownTs) > 5 * 60 * 1000) {
+      meta.createSpan({
+        cls: "agent-msg-time",
+        text: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
+      this.lastShownTs = ts;
+    }
+
     const content = el.createDiv({ cls: "agent-msg-content" });
     for (const img of images) {
       const thumb = content.createEl("img", { cls: "agent-msg-img", attr: { alt: img.name, title: this.tr("viewImage") } });
@@ -573,14 +586,7 @@ export class AgentChatView extends ItemView {
       thumb.addEventListener("click", () => void this.openImageViewer(img.data, img.name));
     }
     if (text) content.createSpan({ text });
-    if (Math.abs(ts - this.lastShownTs) > 5 * 60 * 1000) {
-      const time = content.createSpan({
-        cls: "agent-msg-time",
-        text: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      });
-      content.addClass("has-time");
-      this.lastShownTs = ts;
-    }
+
     // Action bar: copy button on user messages too.
     const bar = el.createDiv({ cls: "agent-msg-actions" });
     const copyBtn = bar.createEl("button", { cls: "agent-msg-action", attr: { "aria-label": this.tr("copy") } });
@@ -975,13 +981,16 @@ export class AgentChatView extends ItemView {
 
     // Live assistant bubble: re-renders markdown as text streams in.
     const liveEl = this.messagesEl.createDiv({ cls: "agent-msg agent-msg-assistant agent-msg-live" });
-    const liveAvatar = liveEl.createDiv({ cls: "agent-msg-avatar is-ai", text: this.plugin.settings.aiAvatar || "🤖" });
+    const liveMeta = liveEl.createDiv({ cls: "agent-msg-meta" });
+    const liveAvatar = liveMeta.createDiv({ cls: "agent-msg-avatar is-ai", text: this.plugin.settings.aiAvatar || "🤖" });
+    liveMeta.createSpan({ cls: "agent-msg-name", text: this.tr("assistantLabel") });
     const liveContent = liveEl.createDiv({ cls: "agent-msg-content" });
-    const cursor = liveEl.createSpan({ cls: "agent-typing-cursor", text: "▊" });
+    const cursor = liveContent.createSpan({ cls: "agent-typing-cursor", text: "▊" });
 
     const renderLive = (md: string): void => {
       liveContent.empty();
       if (md) MarkdownRenderer.render(this.app, md, liveContent, "", this);
+      liveContent.appendChild(cursor);
       if (this.plugin.settings.autoScroll !== false) {
         this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
       }
