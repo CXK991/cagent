@@ -36,6 +36,7 @@ function runWithTimeout<T>(p: Promise<T>, ms: number, name: string): Promise<T> 
 const BASE_PROMPT = `You are an AI agent embedded in Obsidian. You can act on the user's vault through the provided tools (read/create/edit/search notes, metadata, backlinks, workspace commands, direct editor text interaction, YAML frontmatter operations).
 
 Guidelines:
+- Never reply with only an acknowledgment ("收到", "好的", "I will" etc.): if the user's request needs tools (search/read/create/edit/plot...), call them IMMEDIATELY in the same reply and keep working through the whole task. Only send the final text answer when the task is actually done.
 - Use tools to gather facts before answering questions about the vault; do not guess note contents.
 - Prefer small, safe edits: append, find_replace_in_note, frontmatter tools or selection/cursor edits over overwrite.
 - When you modify files, tell the user exactly what you changed.
@@ -153,6 +154,7 @@ export class ObsidianAgent {
       return messages.slice(1);
     };
 
+    let truncatedRetries = 0;
     for (let i = 0; i < maxIterations; i++) {
       const stopped = stopIfCancelled();
       if (stopped) return stopped;
@@ -192,6 +194,19 @@ export class ObsidianAgent {
       }
 
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
+        // Provider hit max_tokens with a plain-text answer (no tool calls):
+        // the reply is incomplete — keep the partial text in history and let
+        // the model continue, so users don't get a one-line ack and nothing else.
+        if (result.finishReason === "length" && truncatedRetries < 2) {
+          truncatedRetries++;
+          onEvent({ type: "thinking", content: "（回复被 max_tokens 截断，正在自动续写…）" });
+          continue;
+        }
+        if (result.finishReason === "length") {
+          const tip = "\n\n⚠️ 回复被 max_tokens 截断。请在设置 → 模型 中调大「最大输出 token」（建议 8192+）。";
+          msg.content = (msg.content ?? "") + tip;
+          onEvent({ type: "assistant", content: msg.content });
+        }
         // Done — final assistant answer.
         return messages.slice(1); // strip system
       }

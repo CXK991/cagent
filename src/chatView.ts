@@ -60,6 +60,8 @@ export class AgentChatView extends ItemView {
   // Time grouping: only show a timestamp if it differs from the previous one
   // by more than this many ms.
   private lastShownTs = 0;
+  /** Floating "back to latest" button (recreated after messagesEl.empty()). */
+  private toBottomBtn: HTMLButtonElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: AgentPlugin) {
     super(leaf);
@@ -183,19 +185,16 @@ export class AgentChatView extends ItemView {
     this.messagesEl = root.createDiv({ cls: "agent-chat-messages" });
 
     // Floating "back to latest" button — anchored inside the message list so
-    // it never overlaps the input row.
-    const toBottomBtn = this.messagesEl.createEl("button", { cls: "agent-to-bottom" });
-    setIcon(toBottomBtn, "down-to-line");
-    toBottomBtn.style.display = "none";
-    toBottomBtn.setAttr("aria-label", this.tr("toLatest"));
-    toBottomBtn.addEventListener("click", () => {
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-      toBottomBtn.style.display = "none";
-    });
+    // it never overlaps the input row. NOTE: the button element itself is
+    // created by mountToBottomButton() because renderWelcome/renderHistory
+    // clear messagesEl with empty(), which would otherwise delete the button
+    // together with the messages (the bug that made it "disappear").
     this.messagesEl.addEventListener("scroll", () => {
+      const btn = this.toBottomBtn;
+      if (!btn) return;
       const el = this.messagesEl;
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-      toBottomBtn.style.display = nearBottom ? "none" : "flex";
+      btn.style.display = nearBottom ? "none" : "flex";
     });
 
     // Pending-image preview row (thumbnails, removable).
@@ -326,6 +325,7 @@ export class AgentChatView extends ItemView {
   private renderWelcome(): void {
     if (!this.messagesEl) return;
     this.messagesEl.empty();
+    this.mountToBottomButton();
     const welcome = this.messagesEl.createDiv({ cls: "agent-welcome" });
 
     const logo = welcome.createDiv({ cls: "agent-welcome-logo", text: this.plugin.settings.aiAvatar || "🤖" });
@@ -407,10 +407,14 @@ export class AgentChatView extends ItemView {
   /** Re-render bubbles from a loaded history. */
   private renderHistory(): void {
     this.messagesEl.empty();
+    this.mountToBottomButton();
     this.bubbles = [];
     const showTools = this.plugin.settings.showToolCalls !== false;
+    // Consecutive tool messages share one collapsible panel per round.
+    let toolPanel: { body: HTMLElement } | null = null;
     for (const m of this.history) {
       if (m.role === "user" && (m.content || m.images)) {
+        toolPanel = null;
         // Strip the injected referenced-files block for display.
         const display = m.content?.split("\n\n<referenced-files>")[0] ?? "";
         const shownText = m.prompt && m.prompt.trim().length > 0 ? m.prompt : display;
@@ -419,11 +423,20 @@ export class AgentChatView extends ItemView {
         } else {
           this.addBubble("agent-msg-user", shownText, { copyable: true, ts: m.ts });
         }
-      } else if (m.role === "assistant" && m.content) {
-        this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
+      } else if (m.role === "assistant") {
+        toolPanel = null;
+        if (m.content) {
+          if (m.thinking) {
+            const panel = this.createPanel(this.tr("thinkingLabel"), true);
+            panel.body.createSpan({ text: m.thinking });
+          }
+          this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
+        }
       } else if (m.role === "tool" && showTools) {
-        const short = m.content && m.content.length > 200 ? m.content.slice(0, 200) + "…" : m.content ?? "";
-        this.addBubble("agent-msg-tool-result", `↳ ${m.name}: ${short}`);
+        if (!toolPanel) toolPanel = this.createPanel(this.tr("toolCallsLabel"), true);
+        const short = m.content && m.content.length > 300 ? m.content.slice(0, 300) + "…" : m.content ?? "";
+        const res = toolPanel.body.createDiv({ cls: "agent-panel-tool-result" });
+        res.createSpan({ text: `⚙ ${m.name}: ${short}` });
       }
     }
   }
@@ -633,9 +646,11 @@ export class AgentChatView extends ItemView {
   private createPanel(
     title: string,
     startCollapsed: boolean,
-    onToggle?: (open: boolean) => void
+    onToggle?: (open: boolean) => void,
+    before?: HTMLElement
   ): { el: HTMLElement; body: HTMLElement; setOpen: (open: boolean) => void } {
     const el = this.messagesEl.createDiv({ cls: "agent-panel" });
+    if (before) this.messagesEl.insertBefore(el, before);
     const header = el.createDiv({ cls: "agent-panel-header" });
     const chevron = header.createDiv({ cls: "agent-panel-chevron" });
     setIcon(chevron, "chevron-right");
@@ -659,6 +674,21 @@ export class AgentChatView extends ItemView {
     });
 
     return { el, body, setOpen };
+  }
+
+  /** Re-create the floating "back to latest" button. messagesEl.empty()
+   *  removes it together with the messages, so call this after every clear. */
+  private mountToBottomButton(): void {
+    this.toBottomBtn?.remove();
+    const btn = this.messagesEl.createEl("button", { cls: "agent-to-bottom" });
+    setIcon(btn, "down-to-line");
+    btn.style.display = "none";
+    btn.setAttr("aria-label", this.tr("toLatest"));
+    btn.addEventListener("click", () => {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      btn.style.display = "none";
+    });
+    this.toBottomBtn = btn;
   }
 
   // ---------- In-chat search ----------
@@ -1019,14 +1049,14 @@ export class AgentChatView extends ItemView {
           renderLive(e.content);
         } else if (e.type === "thinking") {
           if (!thinkingPanel) {
-            thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
+            thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking, undefined, liveEl);
           }
           thinkingPanel.body.empty();
           thinkingPanel.body.createSpan({ text: e.content });
         } else if (e.type === "tool_call") {
           if (!showTools) return;
           if (!toolPanel) {
-            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true);
+            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true, undefined, liveEl);
           }
           const line = toolPanel.body.createDiv({ cls: "agent-panel-tool" });
           const name = line.createSpan({ cls: "agent-panel-tool-name" });
@@ -1035,7 +1065,7 @@ export class AgentChatView extends ItemView {
         } else if (e.type === "tool_result") {
           if (!showTools) return;
           if (!toolPanel) {
-            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true);
+            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true, undefined, liveEl);
           }
           const short = e.content.length > 300 ? e.content.slice(0, 300) + "…" : e.content;
           const res = toolPanel.body.createDiv({ cls: "agent-panel-tool-result" });

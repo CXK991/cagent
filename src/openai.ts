@@ -10,6 +10,8 @@ export interface ChatMessage {
   images?: string[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  /** Model reasoning (DeepSeek reasoning_content / <think> block), shown in a collapsible panel. */
+  thinking?: string;
   name?: string;
   /** Wall-clock timestamp (ms) used to display message times. */
   ts?: number;
@@ -269,6 +271,7 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
       role: "assistant",
       content: text.length > 0 ? text : null,
       tool_calls: choice.message.tool_calls,
+      thinking: thinking.length > 0 ? thinking : undefined,
     },
     finishReason: choice.finish_reason ?? "stop",
     thinking: thinking.length > 0 ? thinking : undefined,
