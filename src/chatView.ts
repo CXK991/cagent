@@ -60,8 +60,6 @@ export class AgentChatView extends ItemView {
   // Time grouping: only show a timestamp if it differs from the previous one
   // by more than this many ms.
   private lastShownTs = 0;
-  /** Floating "back to latest" button (recreated after messagesEl.empty()). */
-  private toBottomBtn: HTMLButtonElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: AgentPlugin) {
     super(leaf);
@@ -184,18 +182,7 @@ export class AgentChatView extends ItemView {
 
     this.messagesEl = root.createDiv({ cls: "agent-chat-messages" });
 
-    // Floating "back to latest" button — anchored inside the message list so
-    // it never overlaps the input row. NOTE: the button element itself is
-    // created by mountToBottomButton() because renderWelcome/renderHistory
-    // clear messagesEl with empty(), which would otherwise delete the button
-    // together with the messages (the bug that made it "disappear").
-    this.messagesEl.addEventListener("scroll", () => {
-      const btn = this.toBottomBtn;
-      if (!btn) return;
-      const el = this.messagesEl;
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-      btn.style.display = nearBottom ? "none" : "flex";
-    });
+
 
     // Pending-image preview row (thumbnails, removable).
     this.previewRow = root.createDiv({ cls: "agent-preview-row" });
@@ -249,6 +236,17 @@ export class AgentChatView extends ItemView {
     this.imageInput.addEventListener("change", () => {
       const file = this.imageInput?.files?.[0];
       if (file) void this.addPendingImage(file);
+    });
+
+    // Always-visible "back to latest" button next to send (user request:
+    // a floating button kept disappearing on mobile).
+    const toBottomBtn = inputRow.createEl("button", {
+      cls: "agent-chat-img agent-chat-to-bottom",
+      attr: { "aria-label": this.tr("toLatest") },
+    });
+    setIcon(toBottomBtn, "down-to-line");
+    toBottomBtn.addEventListener("click", () => {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     });
 
     this.sendBtn = inputRow.createEl("button", { cls: "agent-chat-send" });
@@ -325,7 +323,6 @@ export class AgentChatView extends ItemView {
   private renderWelcome(): void {
     if (!this.messagesEl) return;
     this.messagesEl.empty();
-    this.mountToBottomButton();
     const welcome = this.messagesEl.createDiv({ cls: "agent-welcome" });
 
     const logo = welcome.createDiv({ cls: "agent-welcome-logo", text: this.plugin.settings.aiAvatar || "🤖" });
@@ -407,7 +404,6 @@ export class AgentChatView extends ItemView {
   /** Re-render bubbles from a loaded history. */
   private renderHistory(): void {
     this.messagesEl.empty();
-    this.mountToBottomButton();
     this.bubbles = [];
     const showTools = this.plugin.settings.showToolCalls !== false;
     // Consecutive tool messages share one collapsible panel per round.
@@ -674,21 +670,6 @@ export class AgentChatView extends ItemView {
     });
 
     return { el, body, setOpen };
-  }
-
-  /** Re-create the floating "back to latest" button. messagesEl.empty()
-   *  removes it together with the messages, so call this after every clear. */
-  private mountToBottomButton(): void {
-    this.toBottomBtn?.remove();
-    const btn = this.messagesEl.createEl("button", { cls: "agent-to-bottom" });
-    setIcon(btn, "down-to-line");
-    btn.style.display = "none";
-    btn.setAttr("aria-label", this.tr("toLatest"));
-    btn.addEventListener("click", () => {
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-      btn.style.display = "none";
-    });
-    this.toBottomBtn = btn;
   }
 
   // ---------- In-chat search ----------
@@ -1030,10 +1011,14 @@ export class AgentChatView extends ItemView {
     try {
       let lastAssistant = "";
       // Collapsible panels for thinking and tool calls (single-use per turn).
-      let thinkingPanel: { body: HTMLElement } | null = null;
-      let toolPanel: { body: HTMLElement } | null = null;
+      // The thinking panel is created up front (collapsed) so every reply has
+      // the two-part structure: a thinking box on top + the answer below.
       const showTools = this.plugin.settings.showToolCalls !== false;
       const collapsedThinking = this.plugin.settings.thinkingCollapsed !== false;
+      const thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking, undefined, liveEl);
+      let hasThinking = false;
+      thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingPlaceholder") });
+      let toolPanel: { body: HTMLElement } | null = null;
 
       this.history = await this.agent.run(this.history, payload, (e) => {
         if (e.type === "usage" && e.usage) {
@@ -1048,9 +1033,7 @@ export class AgentChatView extends ItemView {
           lastAssistant = e.content;
           renderLive(e.content);
         } else if (e.type === "thinking") {
-          if (!thinkingPanel) {
-            thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking, undefined, liveEl);
-          }
+          hasThinking = true;
           thinkingPanel.body.empty();
           thinkingPanel.body.createSpan({ text: e.content });
         } else if (e.type === "tool_call") {
@@ -1073,6 +1056,10 @@ export class AgentChatView extends ItemView {
         }
       });
       if (!lastAssistant) renderLive(this.tr("noTextAnswer"));
+      if (!hasThinking) {
+        thinkingPanel.body.empty();
+        thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingEmpty") });
+      }
       // Stamp timestamps on the newest messages if missing (persisted history).
       for (let i = this.history.length - 1; i >= 0; i--) {
         const m = this.history[i];
