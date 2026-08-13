@@ -452,6 +452,12 @@ export class AgentChatView extends ItemView {
             if (m.content) {
               this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
             }
+            // Keep the two-part structure everywhere: a collapsible thinking
+            // box above every answer, with a placeholder when there's nothing.
+            if (!thinkingPanel) {
+              thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
+              thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingEmpty") });
+            }
             thinkingPanel = null;
           }
         } else if (!isProcessRound) {
