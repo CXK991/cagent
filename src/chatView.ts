@@ -406,11 +406,17 @@ export class AgentChatView extends ItemView {
     this.messagesEl.empty();
     this.bubbles = [];
     const showTools = this.plugin.settings.showToolCalls !== false;
+    const collapsedThinking = this.plugin.settings.thinkingCollapsed !== false;
     // Consecutive tool messages share one collapsible panel per round.
     let toolPanel: { body: HTMLElement } | null = null;
+    // Intermediate assistant rounds (rounds that called tools) accumulate in
+    // ONE collapsible thinking/process panel; only rounds WITHOUT tool calls
+    // are final answers and get a result bubble.
+    let thinkingPanel: { body: HTMLElement } | null = null;
     for (const m of this.history) {
       if (m.role === "user" && (m.content || m.images)) {
         toolPanel = null;
+        thinkingPanel = null;
         // Strip the injected referenced-files block for display.
         const display = m.content?.split("\n\n<referenced-files>")[0] ?? "";
         const shownText = m.prompt && m.prompt.trim().length > 0 ? m.prompt : display;
@@ -420,13 +426,36 @@ export class AgentChatView extends ItemView {
           this.addBubble("agent-msg-user", shownText, { copyable: true, ts: m.ts });
         }
       } else if (m.role === "assistant") {
-        toolPanel = null;
-        if (m.content) {
-          if (m.thinking) {
-            const panel = this.createPanel(this.tr("thinkingLabel"), true);
-            panel.body.createSpan({ text: m.thinking });
+        const isProcessRound = !!m.tool_calls && m.tool_calls.length > 0;
+        if (!isProcessRound) toolPanel = null;
+        if (m.content || m.thinking) {
+          if (isProcessRound) {
+            // Process round: narration + reasoning go into the process panel.
+            if (!thinkingPanel) {
+              thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
+            }
+            if (m.thinking) {
+              thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: m.thinking });
+            }
+            if (m.content) {
+              thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: m.content });
+            }
+          } else {
+            // Final round: reasoning joins the process panel, the answer gets
+            // the result bubble.
+            if (m.thinking) {
+              if (!thinkingPanel) {
+                thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
+              }
+              thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: m.thinking });
+            }
+            if (m.content) {
+              this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
+            }
+            thinkingPanel = null;
           }
-          this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
+        } else if (!isProcessRound) {
+          thinkingPanel = null;
         }
       } else if (m.role === "tool" && showTools) {
         if (!toolPanel) toolPanel = this.createPanel(this.tr("toolCallsLabel"), true);
@@ -1017,7 +1046,7 @@ export class AgentChatView extends ItemView {
       const collapsedThinking = this.plugin.settings.thinkingCollapsed !== false;
       const thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking, undefined, liveEl);
       let hasThinking = false;
-      thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingPlaceholder") });
+      const thinkingPlaceholder = thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingPlaceholder") });
       let toolPanel: { body: HTMLElement } | null = null;
 
       this.history = await this.agent.run(this.history, payload, (e) => {
@@ -1034,8 +1063,10 @@ export class AgentChatView extends ItemView {
           renderLive(e.content);
         } else if (e.type === "thinking") {
           hasThinking = true;
-          thinkingPanel.body.empty();
-          thinkingPanel.body.createSpan({ text: e.content });
+          thinkingPlaceholder?.remove();
+          // Append, don't replace: reasoning + every intermediate narration
+          // line stays visible in the one collapsible process panel.
+          thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: e.content });
         } else if (e.type === "tool_call") {
           if (!showTools) return;
           if (!toolPanel) {

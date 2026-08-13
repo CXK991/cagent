@@ -829,6 +829,20 @@
   font-style: italic;
 }
 
+/* One line of the thinking/process panel (reasoning or intermediate narration). */
+.agent-panel-thinking-line {
+  padding: 3px 0;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-panel-thinking-line + .agent-panel-thinking-line {
+  border-top: 1px dashed var(--background-modifier-border);
+  margin-top: 4px;
+  padding-top: 7px;
+}
+
 /* Back-to-latest button inside the input row (always visible). */
 .agent-chat-to-bottom {
   color: var(--text-muted);

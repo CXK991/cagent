@@ -32,6 +32,35 @@ function runWithTimeout<T>(p: Promise<T>, ms: number, name: string): Promise<T> 
     if (timer !== undefined) clearTimeout(timer);
   });
 }
+/** Max times the loop auto-nudges a confirmation-only reply before accepting it. */
+const ACK_NUDGE_MAX = 2;
+
+/**
+ * True when the model's reply is just a confirmation / promise ("收到，我马上做…")
+ * that did no actual work (no tool call in the same round). Such replies are the
+ * classic "只回一句话就断" stall — drop them and nudge the model to keep going.
+ */
+function looksLikeAckOnly(content: string): boolean {
+  const text = content.trim().replace(/\s+/g, "");
+  if (!text || text.length > 80) return false;
+  // Completed answers ("已经…了") are real results — never nudge those.
+  if (/(已|已经)(完成|生成|插入|写入|保存|更新|修改|删除|添加|搞定|处理)/.test(text)) return false;
+  const head = text.slice(0, 30);
+  return /^(好的|好|行|收到|明白|了解|没问题|可以|嗯|好嘞|抱歉|对不起|让我|我来|请稍等|稍等|正在|马上|准备|我(现在|立刻|马上|立即|这就|先)?(去|来|会|就)?(执行|处理|检查|核实|搜索|读取|查看|分析|开始|继续|做|写|生成|准备|打开|看看|动手|安排|着手))/.test(head);
+}
+
+function ackNudge(attempt: number): string {
+  return attempt === 1
+    ? "（系统）你刚才只回复了确认/承诺，没有实际执行任何操作。请立即调用工具完成用户请求，一直做到任务完成，最后一次性给出完整结果。不要再只回复话术。"
+    : "（系统）你再次只回复了话术仍未执行。请立刻调用工具完成上述任务并输出最终结果；若任务确已由之前的步骤完成，直接给出完整的最终答复。";
+}
+
+function ackNudgeHint(attempt: number): string {
+  return attempt === 1
+    ? "（检测到仅确认/承诺的回复，已自动要求继续执行…）"
+    : "（再次检测到空话术，已强制要求继续执行…）";
+}
+
 
 const BASE_PROMPT = `You are an AI agent embedded in Obsidian. You can act on the user's vault through the provided tools (read/create/edit/search notes, metadata, backlinks, workspace commands, direct editor text interaction, YAML frontmatter operations).
 
@@ -151,10 +180,16 @@ export class ObsidianAgent {
       const stopMsg: ChatMessage = { role: "assistant", content: "Stopped by user." };
       messages.push(stopMsg);
       onEvent({ type: "assistant", content: stopMsg.content! });
-      return messages.slice(1);
+      return finishMessages();
     };
 
     let truncatedRetries = 0;
+    let ackRetries = 0;
+    // References of auto-pushed "please keep going" nudges — filtered out of the
+    // returned history so the user never sees them as bubbles.
+    const nudgeRefs = new Set<ChatMessage>();
+    const finishMessages = (): ChatMessage[] =>
+      messages.slice(1).filter((m) => !nudgeRefs.has(m)); // strip system + nudges
     for (let i = 0; i < maxIterations; i++) {
       const stopped = stopIfCancelled();
       if (stopped) return stopped;
@@ -185,15 +220,24 @@ export class ObsidianAgent {
         });
       }
 
+      const hasToolCalls = !!msg.tool_calls && msg.tool_calls.length > 0;
       if (result.thinking) {
         onEvent({ type: "thinking", content: result.thinking });
       }
 
       if (msg.content) {
-        onEvent({ type: "assistant", content: msg.content });
+        if (hasToolCalls) {
+          // Intermediate round: the model narrates progress before calling
+          // tools. This is process text, NOT the final answer — route it into
+          // the collapsible thinking/process panel so the chat ends with ONE
+          // result box instead of a stream of mini bubbles.
+          onEvent({ type: "thinking", content: msg.content });
+        } else {
+          onEvent({ type: "assistant", content: msg.content });
+        }
       }
 
-      if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      if (!hasToolCalls) {
         // Provider hit max_tokens with a plain-text answer (no tool calls):
         // the reply is incomplete — keep the partial text in history and let
         // the model continue, so users don't get a one-line ack and nothing else.
@@ -206,13 +250,27 @@ export class ObsidianAgent {
           const tip = "\n\n⚠️ 回复被 max_tokens 截断。请在设置 → 模型 中调大「最大输出 token」（建议 8192+）。";
           msg.content = (msg.content ?? "") + tip;
           onEvent({ type: "assistant", content: msg.content });
+          return finishMessages();
+        }
+        // The model sometimes answers with only a confirmation/promise
+        // ("收到，我马上做…") and stops without calling any tool — the classic
+        // "回一句就断" stall. Drop the ack from history and push a nudge so the
+        // run keeps going; after ACK_NUDGE_MAX nudges we accept whatever comes.
+        if (ackRetries < ACK_NUDGE_MAX && msg.content && looksLikeAckOnly(msg.content)) {
+          messages.pop(); // remove the ack-only assistant reply
+          ackRetries++;
+          onEvent({ type: "thinking", content: ackNudgeHint(ackRetries) });
+          const nudge: ChatMessage = { role: "user", content: ackNudge(ackRetries) };
+          messages.push(nudge);
+          nudgeRefs.add(nudge);
+          continue;
         }
         // Done — final assistant answer.
-        return messages.slice(1); // strip system
+        return finishMessages();
       }
 
       // Execute requested tool calls.
-      for (const call of msg.tool_calls) {
+      for (const call of msg.tool_calls ?? []) {
         const stoppedInner = stopIfCancelled();
         if (stoppedInner) return stoppedInner;
 
