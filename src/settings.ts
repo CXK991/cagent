@@ -1,4 +1,5 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { ProfileManagerModal } from "./profileModal";
 import { listModels, testConnection } from "./openai";
 import { LANG_OPTIONS, t, type Key, type Lang } from "./i18n";
 import type AgentPlugin from "./main";
@@ -176,134 +177,20 @@ export class AgentSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { cls: "cagent-section-title", text: title });
   }
 
-  /** Render the model-profiles manager: one editable block per saved config. */
+  /** Model configs live in a dedicated dialog so the settings page stays short. */
   private renderProfiles(containerEl: HTMLElement): void {
     const s = this.plugin.settings;
-    if (s.profiles.length === 0) {
-      containerEl.createDiv({ cls: "cagent-muted", text: this.tr("noProfiles") });
-    }
-
-    for (const p of s.profiles) this.renderProfile(containerEl, p);
-
+    const active = s.profiles.find((x) => x.id === s.activeProfileId);
+    const summary = active
+      ? `${active.name || this.tr("unnamedProfile")} · ${active.model || "?"}`
+      : this.tr("noProfiles");
     new Setting(containerEl)
-      .setName(this.tr("addProfile"))
+      .setName(this.tr("secProfiles"))
+      .setDesc(summary)
       .addButton((b) =>
-        b.setButtonText(this.tr("addProfileBtn")).setCta().onClick(async () => {
-          s.profiles.push({ id: newProfileId(), name: "", baseUrl: "", apiKey: "", model: "" });
-          await this.plugin.saveSettings();
-          this.display();
+        b.setButtonText(this.tr("manageProfiles")).setCta().onClick(() => {
+          new ProfileManagerModal(this.app, this.plugin).open();
         })
-      );
-  }
-
-  /** One profile: name / baseUrl / apiKey (with Test) / model + actions. */
-  private renderProfile(containerEl: HTMLElement, p: ModelProfile): void {
-    const s = this.plugin.settings;
-    const isActive = p.id === s.activeProfileId;
-
-    // Header row: name + active indicator + actions.
-    new Setting(containerEl)
-      .setName(p.name || this.tr("unnamedProfile"))
-      .setDesc(isActive ? this.tr("activeNow") : "")
-      .addExtraButton((b) =>
-        b.setIcon("check-circle")
-          .setTooltip(isActive ? this.tr("activeNow") : this.tr("setActive"))
-          .onClick(async () => {
-            if (!isActive) {
-              s.activeProfileId = p.id;
-              syncActiveProfile(s);
-              await this.plugin.saveSettings();
-              this.display();
-            }
-          })
-      )
-      .addExtraButton((b) =>
-        b.setIcon("trash")
-          .setTooltip(this.tr("deleteProfile"))
-          .onClick(async () => {
-            if (s.profiles.length <= 1) {
-              new Notice(this.tr("cannotDeleteLast"));
-              return;
-            }
-            s.profiles = s.profiles.filter((x) => x.id !== p.id);
-            if (isActive) {
-              s.activeProfileId = s.profiles[0].id;
-              syncActiveProfile(s);
-            }
-            await this.plugin.saveSettings();
-            this.display();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName(this.tr("profileName"))
-      .addText((t) =>
-        t.setPlaceholder(this.tr("profileNamePh"))
-          .setValue(p.name)
-          .onChange(async (v) => {
-            p.name = v.trim();
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName(this.tr("baseUrl"))
-      .addText((t) =>
-        t.setPlaceholder("https://api.deepseek.com/v1")
-          .setValue(p.baseUrl)
-          .onChange(async (v) => {
-            p.baseUrl = v.trim();
-            if (isActive) syncActiveProfile(s);
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName(this.tr("apiKey"))
-      .addText((t) => {
-        t.inputEl.type = "password";
-        t.setValue(p.apiKey).onChange(async (v) => {
-          p.apiKey = v.trim();
-          if (isActive) syncActiveProfile(s);
-          await this.plugin.saveSettings();
-        });
-      })
-      .addExtraButton((b) =>
-        b.setIcon("puzzle")
-          .setTooltip(this.tr("testConn"))
-          .onClick(async () => {
-            new Notice(this.tr("testingConn"));
-            const r = await testConnection(p.baseUrl, p.apiKey, p.model);
-            if (r.ok) new Notice(this.tr("testOk", { model: r.message }));
-            else new Notice(this.tr("testFail") + " " + r.message);
-          })
-      );
-
-    new Setting(containerEl)
-      .setName(this.tr("model"))
-      .addText((t) =>
-        t.setValue(p.model).onChange(async (v) => {
-          p.model = v.trim();
-          if (isActive) syncActiveProfile(s);
-          await this.plugin.saveSettings();
-        })
-      )
-      .addExtraButton((b) =>
-        b.setIcon("rotate-cw")
-          .setTooltip(this.tr("fetchModels"))
-          .onClick(async () => {
-            new Notice(this.tr("fetchingModels"));
-            const models = await listModels(p.baseUrl, p.apiKey);
-            if (models.length === 0) {
-              new Notice(this.tr("noModelsReturned"));
-              return;
-            }
-            p.model = models.includes(p.model) ? p.model : models[0];
-            if (isActive) syncActiveProfile(s);
-            await this.plugin.saveSettings();
-            new Notice(this.tr("foundModels", { n: models.length }));
-            this.display();
-          })
       );
   }
 

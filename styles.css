@@ -1170,4 +1170,23 @@ body.is-mobile .agent-chat-root.keyboard-open .agent-chat-header {
   border-color: color-mix(in srgb, var(--interactive-accent) 60%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
 }
+/* ---------- Model profile manager dialog ---------- */
+.agent-profile-modal .modal-content {
+  max-height: 75vh;
+  overflow-y: auto;
+}
 
+.agent-profile-modal-title {
+  margin: 0 0 4px;
+}
+
+.agent-profile-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  padding: 4px 10px 10px;
+  margin: 10px 0;
+}
+
+.agent-profile-card + .agent-profile-card {
+  margin-top: 12px;
+}

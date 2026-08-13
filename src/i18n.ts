@@ -128,6 +128,8 @@ const zh = {
   searchApiKeyDesc: "在 tavily.com 注册后从控制台获取。免费额度每月 1000 次。",
 
   secProfiles: "模型配置",
+  secProfilesDesc: "在此添加、编辑或切换模型配置，避免设置页被拉长。",
+  manageProfiles: "管理模型配置",
   noProfiles: "还没有模型配置。点击下方按钮添加。",
   addProfile: "添加模型配置",
   addProfileBtn: "+ 添加配置",
@@ -308,6 +310,8 @@ const en: Record<Key, string> = {
   searchApiKeyDesc: "Get one from your tavily.com dashboard. Free tier: 1000 searches/month.",
 
   secProfiles: "Model Profiles",
+  secProfilesDesc: "Add, edit or switch saved model configurations here — keeps the settings page short.",
+  manageProfiles: "Manage model profiles",
   noProfiles: "No model profiles yet. Click the button below to add one.",
   addProfile: "Add model profile",
   addProfileBtn: "+ Add profile",
