@@ -843,6 +843,111 @@
   padding-top: 7px;
 }
 
+/* ---------- Pill-style toggles (thinking / tool calls) ---------- */
+
+.agent-toggle {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 2px 0;
+}
+
+.agent-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.agent-toggle-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.agent-toggle-chevron {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.agent-toggle.is-live .agent-toggle-btn {
+  color: var(--text-accent);
+  border-color: var(--interactive-accent);
+}
+
+.agent-toggle.is-live .agent-toggle-title::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  animation: cagent-pulse 1.1s ease-in-out infinite;
+}
+
+.agent-toggle-body {
+  display: none;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.agent-toggle.is-open .agent-toggle-body {
+  display: block;
+  animation: cagent-fade-in 0.15s ease;
+}
+
+.agent-toggle-line {
+  padding: 3px 0;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-toggle-line + .agent-toggle-line {
+  border-top: 1px dashed var(--background-modifier-border);
+  margin-top: 4px;
+  padding-top: 7px;
+}
+
+.agent-toggle-tool {
+  padding: 2px 0;
+  font-family: var(--font-monospace);
+  color: var(--text-accent);
+}
+
+.agent-toggle-tool-args {
+  color: var(--text-muted);
+}
+
+.agent-toggle-tool-result {
+  padding: 2px 0 6px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+@keyframes cagent-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
 /* Back-to-latest button inside the input row (always visible). */
 .agent-chat-to-bottom {
   color: var(--text-muted);
@@ -1072,6 +1177,18 @@ body.is-mobile .agent-chat-root.keyboard-open .agent-chat-header {
   /* Welcome tips span the full width. */
   .agent-welcome-tips {
     max-width: 100%;
+  }
+
+  /* Pill toggles: comfortable full tap area on phones. */
+  .agent-toggle-btn {
+    min-height: 38px;
+    padding: 8px 14px;
+    font-size: 14px;
+  }
+
+  .agent-toggle-body {
+    max-height: 40vh;
+    font-size: 13px;
   }
 
 }

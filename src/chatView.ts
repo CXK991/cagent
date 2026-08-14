@@ -14,6 +14,16 @@ const MAX_IMAGE_SIDE = 1280;
 const MAX_FILE_REFS = 5;
 const MAX_SUGGESTIONS = 8;
 
+/** Handle returned by createToggle (pill-style expandable button). */
+interface ToggleHandle {
+  el: HTMLElement;
+  body: HTMLElement;
+  setTitle: (t: string) => void;
+  setLive: (live: boolean) => void;
+  setOpen: (open: boolean) => void;
+  remove: () => void;
+}
+
 export const VIEW_TYPE_AGENT_CHAT = "agent-tools-chat";
 
 export class AgentChatView extends ItemView {
@@ -244,7 +254,7 @@ export class AgentChatView extends ItemView {
       cls: "agent-chat-img agent-chat-to-bottom",
       attr: { "aria-label": this.tr("toLatest") },
     });
-    setIcon(toBottomBtn, "down-to-line");
+    setIcon(toBottomBtn, "arrow-down");
     toBottomBtn.addEventListener("click", () => {
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     });
@@ -405,18 +415,20 @@ export class AgentChatView extends ItemView {
   private renderHistory(): void {
     this.messagesEl.empty();
     this.bubbles = [];
-    const showTools = this.plugin.settings.showToolCalls !== false;
-    const collapsedThinking = this.plugin.settings.thinkingCollapsed !== false;
-    // Consecutive tool messages share one collapsible panel per round.
-    let toolPanel: { body: HTMLElement } | null = null;
+    // Consecutive tool messages share one pill toggle per round.
+    let toolToggle: ToggleHandle | null = null;
+    let toolCount = 0;
     // Intermediate assistant rounds (rounds that called tools) accumulate in
-    // ONE collapsible thinking/process panel; only rounds WITHOUT tool calls
-    // are final answers and get a result bubble.
-    let thinkingPanel: { body: HTMLElement } | null = null;
+    // ONE thinking toggle; only rounds WITHOUT tool calls are final answers
+    // and get a result bubble. The toggle only appears when there is content.
+    let thinkingToggle: ToggleHandle | null = null;
+    let thinkingLines = 0;
     for (const m of this.history) {
       if (m.role === "user" && (m.content || m.images)) {
-        toolPanel = null;
-        thinkingPanel = null;
+        toolToggle = null;
+        toolCount = 0;
+        thinkingToggle = null;
+        thinkingLines = 0;
         // Strip the injected referenced-files block for display.
         const display = m.content?.split("\n\n<referenced-files>")[0] ?? "";
         const shownText = m.prompt && m.prompt.trim().length > 0 ? m.prompt : display;
@@ -427,46 +439,49 @@ export class AgentChatView extends ItemView {
         }
       } else if (m.role === "assistant") {
         const isProcessRound = !!m.tool_calls && m.tool_calls.length > 0;
-        if (!isProcessRound) toolPanel = null;
         if (m.content || m.thinking) {
           if (isProcessRound) {
-            // Process round: narration + reasoning go into the process panel.
-            if (!thinkingPanel) {
-              thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
+            // Process round: narration + reasoning go into the thinking toggle.
+            if (!thinkingToggle) {
+              thinkingToggle = this.createToggle(this.tr("thinkingBtn"));
             }
             if (m.thinking) {
-              thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: m.thinking });
+              thinkingToggle.body.createDiv({ cls: "agent-toggle-line", text: m.thinking });
+              thinkingLines++;
             }
             if (m.content) {
-              thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: m.content });
+              thinkingToggle.body.createDiv({ cls: "agent-toggle-line", text: m.content });
+              thinkingLines++;
             }
           } else {
-            // Final round: reasoning joins the process panel, the answer gets
-            // the result bubble.
+            // Final round: reasoning joins the toggle, the answer gets the bubble.
             if (m.thinking) {
-              if (!thinkingPanel) {
-                thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
+              if (!thinkingToggle) {
+                thinkingToggle = this.createToggle(this.tr("thinkingBtn"));
               }
-              thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: m.thinking });
+              thinkingToggle.body.createDiv({ cls: "agent-toggle-line", text: m.thinking });
+              thinkingLines++;
             }
             if (m.content) {
               this.addBubble("agent-msg-assistant", m.content, { markdown: true, copyable: true, ts: m.ts });
             }
-            // Keep the two-part structure everywhere: a collapsible thinking
-            // box above every answer, with a placeholder when there's nothing.
-            if (!thinkingPanel) {
-              thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking);
-              thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingEmpty") });
+            // No thinking/process content? Drop the empty toggle entirely.
+            if (thinkingLines === 0 && thinkingToggle) {
+              thinkingToggle.el.remove();
             }
-            thinkingPanel = null;
+            thinkingToggle = null;
+            thinkingLines = 0;
           }
-        } else if (!isProcessRound) {
-          thinkingPanel = null;
         }
-      } else if (m.role === "tool" && showTools) {
-        if (!toolPanel) toolPanel = this.createPanel(this.tr("toolCallsLabel"), true);
+      } else if (m.role === "tool") {
+        if (!toolToggle) {
+          toolToggle = this.createToggle(this.tr("toolCallsBtn"));
+          toolCount = 0;
+        }
+        toolCount++;
+        toolToggle.setTitle(`${this.tr("toolCallsBtn")} (${toolCount})`);
         const short = m.content && m.content.length > 300 ? m.content.slice(0, 300) + "…" : m.content ?? "";
-        const res = toolPanel.body.createDiv({ cls: "agent-panel-tool-result" });
+        const res = toolToggle.body.createDiv({ cls: "agent-toggle-tool-result" });
         res.createSpan({ text: `⚙ ${m.name}: ${short}` });
       }
     }
@@ -673,38 +688,41 @@ export class AgentChatView extends ItemView {
     this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 120) + "px";
   }
 
-  /** Create a collapsible panel (for thinking / tool calls) with a header. */
-  private createPanel(
+  /** Create a pill-style toggle (thinking / tool calls): a button that
+   * expands/collapses its body on click. Starts collapsed; the caller decides
+   * whether it stays visible. */
+  private createToggle(
     title: string,
-    startCollapsed: boolean,
-    onToggle?: (open: boolean) => void,
     before?: HTMLElement
-  ): { el: HTMLElement; body: HTMLElement; setOpen: (open: boolean) => void } {
-    const el = this.messagesEl.createDiv({ cls: "agent-panel" });
+  ): ToggleHandle {
+    const el = this.messagesEl.createDiv({ cls: "agent-toggle" });
     if (before) this.messagesEl.insertBefore(el, before);
-    const header = el.createDiv({ cls: "agent-panel-header" });
-    const chevron = header.createDiv({ cls: "agent-panel-chevron" });
+    const btn = el.createEl("button", { cls: "agent-toggle-btn", attr: { type: "button" } });
+    const titleEl = btn.createSpan({ cls: "agent-toggle-title", text: title });
+    const chevron = btn.createSpan({ cls: "agent-toggle-chevron" });
     setIcon(chevron, "chevron-right");
-    header.createSpan({ cls: "agent-panel-title", text: title });
-    let open = !startCollapsed;
-    const body = el.createDiv({ cls: "agent-panel-body" });
-
+    const body = el.createDiv({ cls: "agent-toggle-body" });
+    let open = false;
     const apply = (): void => {
       el.toggleClass("is-open", open);
       body.style.display = open ? "block" : "none";
       chevron.empty();
       setIcon(chevron, open ? "chevron-down" : "chevron-right");
     };
-    const setOpen = (v: boolean): void => { open = v; apply(); };
     apply();
-
-    header.addEventListener("click", () => {
-      setOpen(!open);
-      onToggle?.(open);
+    btn.addEventListener("click", () => {
+      open = !open;
+      apply();
       if (open) this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     });
-
-    return { el, body, setOpen };
+    return {
+      el,
+      body,
+      setTitle: (t: string) => titleEl.setText(t),
+      setLive: (live: boolean) => el.toggleClass("is-live", live),
+      setOpen: (v: boolean) => { open = v; apply(); },
+      remove: () => el.remove(),
+    };
   }
 
   // ---------- In-chat search ----------
@@ -1045,15 +1063,11 @@ export class AgentChatView extends ItemView {
 
     try {
       let lastAssistant = "";
-      // Collapsible panels for thinking and tool calls (single-use per turn).
-      // The thinking panel is created up front (collapsed) so every reply has
-      // the two-part structure: a thinking box on top + the answer below.
-      const showTools = this.plugin.settings.showToolCalls !== false;
-      const collapsedThinking = this.plugin.settings.thinkingCollapsed !== false;
-      const thinkingPanel = this.createPanel(this.tr("thinkingLabel"), collapsedThinking, undefined, liveEl);
-      let hasThinking = false;
-      const thinkingPlaceholder = thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingPlaceholder") });
-      let toolPanel: { body: HTMLElement } | null = null;
+      // Button-style toggles: thinking and tool calls only appear when there
+      // is something to show, and start collapsed. (Object holders keep the
+      // closure assignments visible to TypeScript's control-flow analysis.)
+      const thinking = { toggle: null as ToggleHandle | null };
+      const tools = { toggle: null as ToggleHandle | null, count: 0 };
 
       this.history = await this.agent.run(this.history, payload, (e) => {
         if (e.type === "usage" && e.usage) {
@@ -1068,34 +1082,43 @@ export class AgentChatView extends ItemView {
           lastAssistant = e.content;
           renderLive(e.content);
         } else if (e.type === "thinking") {
-          hasThinking = true;
-          thinkingPlaceholder?.remove();
-          // Append, don't replace: reasoning + every intermediate narration
-          // line stays visible in the one collapsible process panel.
-          thinkingPanel.body.createDiv({ cls: "agent-panel-thinking-line", text: e.content });
-        } else if (e.type === "tool_call") {
-          if (!showTools) return;
-          if (!toolPanel) {
-            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true, undefined, liveEl);
+          if (!thinking.toggle) {
+            thinking.toggle = this.createToggle(this.tr("thinkingLive"), liveEl);
+            thinking.toggle.setLive(true);
           }
-          const line = toolPanel.body.createDiv({ cls: "agent-panel-tool" });
-          const name = line.createSpan({ cls: "agent-panel-tool-name" });
+          // Append, don't replace: reasoning + every intermediate narration
+          // line stays visible inside the one expandable button.
+          thinking.toggle.body.createDiv({ cls: "agent-toggle-line", text: e.content });
+        } else if (e.type === "tool_call") {
+          if (!tools.toggle) {
+            tools.toggle = this.createToggle(this.tr("toolCallsBtn"), liveEl);
+            tools.count = 0;
+          }
+          tools.count++;
+          tools.toggle.setTitle(`${this.tr("toolCallsBtn")} (${tools.count})`);
+          const line = tools.toggle.body.createDiv({ cls: "agent-toggle-tool" });
+          const name = line.createSpan({ cls: "agent-toggle-tool-name" });
           name.setText(`⚙ ${e.name}`);
-          line.createSpan({ cls: "agent-panel-tool-args", text: e.content });
+          line.createSpan({ cls: "agent-toggle-tool-args", text: e.content });
         } else if (e.type === "tool_result") {
-          if (!showTools) return;
-          if (!toolPanel) {
-            toolPanel = this.createPanel(this.tr("toolCallsLabel"), true, undefined, liveEl);
+          if (!tools.toggle) {
+            tools.toggle = this.createToggle(this.tr("toolCallsBtn"), liveEl);
           }
           const short = e.content.length > 300 ? e.content.slice(0, 300) + "…" : e.content;
-          const res = toolPanel.body.createDiv({ cls: "agent-panel-tool-result" });
+          const res = tools.toggle.body.createDiv({ cls: "agent-toggle-tool-result" });
           res.createSpan({ text: `↳ ${short}` });
         }
       });
       if (!lastAssistant) renderLive(this.tr("noTextAnswer"));
-      if (!hasThinking) {
-        thinkingPanel.body.empty();
-        thinkingPanel.body.createSpan({ cls: "agent-panel-thinking-placeholder", text: this.tr("thinkingEmpty") });
+      // Finalize the thinking toggle: it stays as a collapsible button only
+      // when it has real content, otherwise it disappears completely.
+      if (thinking.toggle) {
+        if (thinking.toggle.body.childElementCount > 0) {
+          thinking.toggle.setTitle(this.tr("thinkingBtn"));
+          thinking.toggle.setLive(false);
+        } else {
+          thinking.toggle.remove();
+        }
       }
       // Stamp timestamps on the newest messages if missing (persisted history).
       for (let i = this.history.length - 1; i >= 0; i--) {

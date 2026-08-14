@@ -43,10 +43,6 @@ export interface AgentSettings {
   maxTokens: number;
   /** Custom system prompt prepended to the default. Empty = default only. */
   systemPromptOverride: string;
-  /** Whether the "thinking" panel is collapsed by default. */
-  thinkingCollapsed: boolean;
-  /** Whether tool-call activity is shown in chat. */
-  showToolCalls: boolean;
   /** Drop past tool messages + tool_calls from what's sent to the API.
    * Saves tokens, cache-friendly; the model only needs the final text. */
   compactToolRounds: boolean;
@@ -106,8 +102,6 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   temperature: 0.7,
   maxTokens: 8192,
   systemPromptOverride: "",
-  thinkingCollapsed: true,
-  showToolCalls: true,
   compactToolRounds: true,
   maxContextMessages: 0,
   autoScroll: true,
@@ -491,26 +485,6 @@ export class AgentSettingTab extends PluginSettingTab {
 
     // ---- Chat display ----
     this.section(containerEl, this.tr("secChat"));
-
-    new Setting(containerEl)
-      .setName(this.tr("thinkingCollapsed"))
-      .setDesc(this.tr("thinkingCollapsedDesc"))
-      .addToggle((tg) =>
-        tg.setValue(this.plugin.settings.thinkingCollapsed).onChange(async (v) => {
-          this.plugin.settings.thinkingCollapsed = v;
-          await this.plugin.saveSettings();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName(this.tr("showToolCalls"))
-      .setDesc(this.tr("showToolCallsDesc"))
-      .addToggle((tg) =>
-        tg.setValue(this.plugin.settings.showToolCalls).onChange(async (v) => {
-          this.plugin.settings.showToolCalls = v;
-          await this.plugin.saveSettings();
-        })
-      );
 
     new Setting(containerEl)
       .setName(this.tr("autoScroll"))
