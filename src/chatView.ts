@@ -713,7 +713,9 @@ export class AgentChatView extends ItemView {
     btn.addEventListener("click", () => {
       open = !open;
       apply();
-      if (open) this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      // Keep the toggle in view when expanding, without jumping to the
+      // bottom of the chat (annoying on phones).
+      if (open) el.scrollIntoView({ block: "nearest" });
     });
     return {
       el,
