@@ -570,17 +570,16 @@ export class AgentChatView extends ItemView {
       content.createSpan({ text });
     }
 
-    // Action bar below the bubble (copy button).
+    // Copy button: AI messages get it inside the meta row (saves a whole
+    // action row under the bubble); user messages keep the action bar,
+    // which the CSS hides to give a bare right-aligned bubble.
     if (opts?.copyable) {
-      const bar = el.createDiv({ cls: "agent-msg-actions" });
-      const copyBtn = bar.createEl("button", { cls: "agent-msg-action", attr: { "aria-label": this.tr("copy") } });
-      setIcon(copyBtn, "copy");
-      copyBtn.addEventListener("click", () => {
-        void navigator.clipboard.writeText(text);
-        setIcon(copyBtn, "check");
-        copyBtn.addClass("copied");
-        window.setTimeout(() => { setIcon(copyBtn, "copy"); copyBtn.removeClass("copied"); }, 1500);
-      });
+      const copyBtn = this.makeCopyButton(text);
+      if (isAi) {
+        meta.appendChild(copyBtn);
+      } else {
+        el.createDiv({ cls: "agent-msg-actions" }).appendChild(copyBtn);
+      }
     }
 
     // Track for in-chat search.
@@ -648,15 +647,7 @@ export class AgentChatView extends ItemView {
 
     // Action bar: copy button on user messages too.
     const bar = el.createDiv({ cls: "agent-msg-actions" });
-    const copyBtn = bar.createEl("button", { cls: "agent-msg-action", attr: { "aria-label": this.tr("copy") } });
-    setIcon(copyBtn, "copy");
-    copyBtn.addEventListener("click", () => {
-      const toCopy = text || (images.map((i) => `[图片: ${i.name}]`).join("\n"));
-      void navigator.clipboard.writeText(toCopy);
-      setIcon(copyBtn, "check");
-      copyBtn.addClass("copied");
-      window.setTimeout(() => { setIcon(copyBtn, "copy"); copyBtn.removeClass("copied"); }, 1500);
-    });
+    bar.appendChild(this.makeCopyButton(text || images.map((i) => `[图片: ${i.name}]`).join("\n")));
 
     this.bubbles.push({ el, text });
     if (this.plugin.settings.autoScroll !== false) {
@@ -680,6 +671,21 @@ export class AgentChatView extends ItemView {
         window.setTimeout(() => { setIcon(btn, "copy"); btn.removeClass("copied"); }, 1500);
       });
     });
+  }
+
+  /** One-tap copy button (used in the AI meta row and the user action bar). */
+  private makeCopyButton(text: string): HTMLButtonElement {
+    const copyBtn = document.createElement("button");
+    copyBtn.addClass("agent-msg-action");
+    copyBtn.setAttr("aria-label", this.tr("copy"));
+    setIcon(copyBtn, "copy");
+    copyBtn.addEventListener("click", () => {
+      void navigator.clipboard.writeText(text);
+      setIcon(copyBtn, "check");
+      copyBtn.addClass("copied");
+      window.setTimeout(() => { setIcon(copyBtn, "copy"); copyBtn.removeClass("copied"); }, 1500);
+    });
+    return copyBtn;
   }
 
   /** Auto-grow the textarea with content up to its max-height. */

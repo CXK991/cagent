@@ -1307,3 +1307,161 @@ body.is-mobile .agent-chat-root.keyboard-open .agent-chat-header {
 .agent-profile-card + .agent-profile-card {
   margin-top: 12px;
 }
+
+/* ============================================================
+   Mobile-first chat refresh (2026-08-14)
+   Left/right chat alignment + grouped spacing + denser messages.
+   ============================================================ */
+
+/* Tighter message flow: small gap inside a speaker group, a bigger
+   gap where the speaker switches. */
+.agent-chat-messages {
+  gap: 6px;
+  padding: 6px 2px;
+}
+
+.agent-msg {
+  align-items: flex-start; /* AI bubbles hug the left */
+  gap: 3px;
+}
+
+.agent-msg-user {
+  align-items: flex-end; /* user bubbles hug the right */
+}
+
+.agent-msg-user + .agent-msg-assistant,
+.agent-msg-assistant + .agent-msg-user {
+  margin-top: 8px; /* 8px + 6px gap = 14px between speakers */
+}
+
+/* Thinking / tool pills keep a little air around them. */
+.agent-toggle {
+  margin: 2px 0;
+}
+
+/* User messages: bare right-aligned bubble — no meta row, no action row. */
+.agent-msg-user .agent-msg-meta,
+.agent-msg-user .agent-msg-actions {
+  display: none;
+}
+
+/* Meta row: compact single line above the bubble. */
+.agent-msg-meta {
+  width: 100%;
+  max-width: 86%;
+  padding: 0 4px;
+}
+
+.agent-msg-meta .agent-msg-action {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+}
+
+/* Bubbles: distinct width + color per speaker so the roles read
+   instantly without reading the label. */
+.agent-msg-content {
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
+.agent-msg-assistant .agent-msg-content {
+  max-width: 88%;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 14px;
+}
+
+.agent-msg-user .agent-msg-content {
+  max-width: 78%;
+  background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-secondary));
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+  color: var(--text-normal);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 6px;
+}
+
+/* ---------- AI answer typography: clear hierarchy ---------- */
+
+.agent-msg-content.markdown-rendered h1,
+.agent-msg-content.markdown-rendered h2,
+.agent-msg-content.markdown-rendered h3,
+.agent-msg-content.markdown-rendered h4 {
+  color: var(--text-accent);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.agent-msg-content.markdown-rendered h1 { font-size: 1.22em; }
+.agent-msg-content.markdown-rendered h2 { font-size: 1.14em; }
+.agent-msg-content.markdown-rendered h3 { font-size: 1.06em; }
+.agent-msg-content.markdown-rendered h4 { font-size: 1em; }
+
+.agent-msg-content.markdown-rendered ul,
+.agent-msg-content.markdown-rendered ol {
+  padding-left: 1.4em;
+}
+
+.agent-msg-content.markdown-rendered li {
+  margin: 0.22em 0;
+}
+
+/* Wide code blocks and tables scroll horizontally instead of
+   blowing up the bubble. */
+.agent-msg-content.markdown-rendered pre,
+.agent-msg-content.markdown-rendered table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.agent-msg-content.markdown-rendered table {
+  display: block;
+}
+
+/* ---------- Mobile tuning ---------- */
+
+@media (max-width: 768px) {
+  .agent-chat-messages {
+    padding: 8px 4px;
+  }
+
+  .agent-msg-content {
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  .agent-msg-assistant .agent-msg-content {
+    max-width: 90%;
+  }
+
+  .agent-msg-user .agent-msg-content {
+    max-width: 82%;
+  }
+
+  .agent-msg-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
+  }
+
+  .agent-msg-meta .agent-msg-action {
+    width: 26px;
+    height: 26px;
+  }
+
+  /* Code-block copy buttons must be visible on touch devices. */
+  .agent-code-copy {
+    opacity: 0.85;
+  }
+
+  /* Thinking/tool pills: a bit lighter so answers dominate. */
+  .agent-toggle-btn {
+    min-height: 34px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .agent-toggle-body {
+    font-size: 13px;
+  }
+}
