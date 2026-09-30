@@ -2,7 +2,7 @@ import { ItemView, MarkdownRenderer, Menu, Notice, Platform, TFile, WorkspaceLea
 import { ObsidianAgent } from "./agent";
 import { truncateText } from "./tools";
 import { SessionStore } from "./sessions";
-import { visionDescribe, type ChatMessage } from "./openai";
+import { type ChatMessage } from "./openai";
 import { t, type Key } from "./i18n";
 import { syncActiveProfile } from "./settings";
 import { SessionManagerModal, ConfirmModal } from "./sessionModal";
@@ -210,10 +210,6 @@ export class AgentChatView extends ItemView {
     });
     setIcon(camBtn, "camera");
     camBtn.addEventListener("click", () => {
-      if (!this.plugin.settings.visionEnabled) {
-        new Notice(this.tr("visionNotEnabled"));
-        return;
-      }
       this.cameraInput?.click();
     });
     this.cameraInput = inputRow.createEl("input", {
@@ -225,18 +221,14 @@ export class AgentChatView extends ItemView {
       if (file) void this.addPendingImage(file);
     });
 
-    // Image (photo library) button — always visible. If the vision model isn't
-    // configured, clicking it shows a hint instead of opening the picker.
+    // Image (photo library) button — always visible. Images go straight to the
+    // active model, so there is no vision toggle to check here.
     const imgBtn = inputRow.createEl("button", {
       cls: "agent-chat-img",
       attr: { "aria-label": this.tr("addImage") },
     });
     setIcon(imgBtn, "image");
     imgBtn.addEventListener("click", () => {
-      if (!this.plugin.settings.visionEnabled) {
-        new Notice(this.tr("visionNotEnabled"));
-        return;
-      }
       this.imageInput?.click();
     });
     this.imageInput = inputRow.createEl("input", {
@@ -431,7 +423,9 @@ export class AgentChatView extends ItemView {
         thinkingLines = 0;
         // Strip the injected referenced-files block for display.
         const display = m.content?.split("\n\n<referenced-files>")[0] ?? "";
-        const shownText = m.prompt && m.prompt.trim().length > 0 ? m.prompt : display;
+        // A recorded `prompt` wins even when empty: image-only messages have no
+        // typed text, and `content` then holds a default instruction instead.
+        const shownText = typeof m.prompt === "string" ? m.prompt : display;
         if (m.images && m.images.length > 0) {
           this.addUserBubble(m.images.map((d) => ({ data: d, name: "image" })), shownText, m.ts ?? Date.now());
         } else {
@@ -609,7 +603,7 @@ export class AgentChatView extends ItemView {
       const fname = normalizePath(`${tmpPath}/view-${Date.now()}.jpg`);
       file = await this.app.vault.createBinary(fname, bytes.buffer);
     } catch (e) {
-      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+      new Notice(`${this.tr("imageError")}${(e as Error).message}`);
       return;
     }
 
@@ -617,7 +611,7 @@ export class AgentChatView extends ItemView {
       const leaf = this.app.workspace.getLeaf("tab");
       await leaf.openFile(file);
     } catch (e) {
-      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+      new Notice(`${this.tr("imageError")}${(e as Error).message}`);
     }
   }
 
@@ -950,7 +944,7 @@ export class AgentChatView extends ItemView {
       this.pendingImages.push({ data, name: file.name || "image" });
       this.renderPreview();
     } catch (e) {
-      new Notice(`${this.tr("visionError")}${(e as Error).message}`);
+      new Notice(`${this.tr("imageError")}${(e as Error).message}`);
     }
   }
 
@@ -972,36 +966,6 @@ export class AgentChatView extends ItemView {
       setIcon(del, "x");
       del.addEventListener("click", () => this.removePendingImage(i));
     });
-  }
-
-  /** Recognize the given images (background) and return per-image text. */
-  private async recognizePending(images: Array<{ data: string; name: string }>): Promise<string[]> {
-    const { visionEnabled, visionBaseUrl, visionApiKey, visionModel } = this.plugin.settings;
-    if (images.length === 0) return [];
-    if (!visionEnabled) {
-      new Notice(this.tr("visionNotEnabled"));
-      return [];
-    }
-    if (!visionApiKey) {
-      new Notice(this.tr("visionNoKey"));
-      return [];
-    }
-    const out: string[] = [];
-    for (const img of images) {
-      try {
-        const text = await visionDescribe({
-          baseUrl: visionBaseUrl,
-          apiKey: visionApiKey,
-          model: visionModel,
-          images: [img.data],
-        });
-        out.push(text);
-      } catch (e) {
-        new Notice(`${this.tr("visionError")}${(e as Error).message}`);
-        out.push("");
-      }
-    }
-    return out;
   }
 
   private async send(): Promise<void> {
@@ -1026,20 +990,22 @@ export class AgentChatView extends ItemView {
     this.pendingImages = [];
     this.renderPreview();
 
-    // Recognize attached images in the background, then combine with the text.
-    const recognized = await this.recognizePending(sentImages);
-    const recogBlock = recognized
-      .filter((r) => r && r.trim().length > 0)
-      .map((r) => `[图片识别内容]\n${r.trim()}`)
-      .join("\n\n");
-    const modelInput = [recogBlock, text].filter((p) => p && p.trim().length > 0).join("\n\n");
+    // Images ride along with this message and are sent to the active model as
+    // multimodal content parts — no separate recognition pass. An image-only
+    // message still needs some instruction, so fall back to a default prompt
+    // (kept out of the bubble, which shows the real typed text only).
+    const modelInput = text.length > 0
+      ? text
+      : sentImages.length > 0
+        ? this.tr("imageDefaultPrompt")
+        : "";
 
     // User bubble shows thumbnails + the original text.
     this.addUserBubble(sentImages, promptText, sentAt);
 
     const payload = await this.buildPayload(modelInput);
 
-    // Persist this user message (recognition hidden from display, kept in content).
+    // Persist this user message (typed text kept in `prompt` for display).
     this.history.push({
       role: "user",
       content: modelInput,
@@ -1147,8 +1113,14 @@ export class AgentChatView extends ItemView {
       this.sessionId = await this.store.save(this.history, this.sessionId);
       this.refreshSessionPicker();
     } catch (e) {
-      renderLive(`Error: ${(e as Error).message}`);
-      new Notice(`Agent error: ${(e as Error).message}`);
+      // A text-only model rejects multimodal content with a provider 400 — tell
+      // the user what to do instead of dumping a raw API error.
+      const errText = (e as Error).message;
+      const hint = sentImages.length > 0 && /image|vision|modality|multimodal|image_url|content|图片|多模态/i.test(errText)
+        ? `\n\n${this.tr("imageUnsupportedHint")}`
+        : "";
+      renderLive(`Error: ${errText}${hint}`);
+      new Notice(`Agent error: ${errText}`);
     } finally {
       this.busy = false;
       setIcon(this.sendBtn, "send");

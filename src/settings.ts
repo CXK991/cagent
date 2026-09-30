@@ -29,11 +29,6 @@ export interface AgentSettings {
   providerPreset: string;
   /** UI language. */
   language: Lang;
-  /** Vision model used to recognize images before they reach the text model. */
-  visionEnabled: boolean;
-  visionBaseUrl: string;
-  visionApiKey: string;
-  visionModel: string;
   /** Web search (Tavily) — enables the AI to search the internet. */
   searchEnabled: boolean;
   searchApiKey: string;
@@ -93,10 +88,6 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   activeProfileId: "",
   providerPreset: "custom",
   language: "zh",
-  visionEnabled: false,
-  visionBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  visionApiKey: "",
-  visionModel: "qwen-vl-max",
   searchEnabled: false,
   searchApiKey: "",
   temperature: 0.7,
@@ -254,51 +245,11 @@ export class AgentSettingTab extends PluginSettingTab {
         ta.inputEl.rows = 4;
       });
 
-    // ---- Vision model (image recognition) ----
-    this.section(containerEl, this.tr("secVision"));
+    // Images are sent straight to the ACTIVE model as multimodal content, so
+    // there is nothing to configure here — just keep this requirement visible.
     new Setting(containerEl)
-      .setName(this.tr("vision"))
-      .setDesc(this.tr("visionDesc"))
-      .addToggle((tg) =>
-        tg.setValue(this.plugin.settings.visionEnabled).onChange(async (v) => {
-          this.plugin.settings.visionEnabled = v;
-          await this.plugin.saveSettings();
-          this.display();
-        })
-      );
-
-    if (this.plugin.settings.visionEnabled) {
-      new Setting(containerEl)
-        .setName(this.tr("visionBaseUrl"))
-        .setDesc(this.tr("visionBaseUrlDesc"))
-        .addText((t) =>
-          t.setValue(this.plugin.settings.visionBaseUrl).onChange(async (v) => {
-            this.plugin.settings.visionBaseUrl = v.trim();
-            await this.plugin.saveSettings();
-          })
-        );
-
-      new Setting(containerEl)
-        .setName(this.tr("visionApiKey"))
-        .setDesc(this.tr("visionApiKeyDesc"))
-        .addText((t) => {
-          t.inputEl.type = "password";
-          t.setValue(this.plugin.settings.visionApiKey).onChange(async (v) => {
-            this.plugin.settings.visionApiKey = v.trim();
-            await this.plugin.saveSettings();
-          });
-        });
-
-      new Setting(containerEl)
-        .setName(this.tr("visionModel"))
-        .setDesc(this.tr("visionModelDesc"))
-        .addText((t) =>
-          t.setValue(this.plugin.settings.visionModel).onChange(async (v) => {
-            this.plugin.settings.visionModel = v.trim();
-            await this.plugin.saveSettings();
-          })
-        );
-    }
+      .setName(this.tr("imageSupport"))
+      .setDesc(this.tr("imageSupportDesc"));
 
     // ---- Web search (Tavily) ----
     this.section(containerEl, this.tr("secSearch"));

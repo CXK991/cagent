@@ -11,7 +11,7 @@ const zh = {
   // Chat view
   chatTitle: "Cagent 对话",
   chatPlaceholder: "问 AI 助手…（@ 引用笔记，Shift+Enter 换行）",
-  addImage: "添加图片（识图）",
+  addImage: "添加图片",
   takePhoto: "拍照",
   viewImage: "点击查看原图",
   viewImageFailed: "图片预览失败：当前环境不支持文件写入。",
@@ -58,19 +58,14 @@ const zh = {
   noApiKey: "Cagent：请先在设置中填写 API Key。",
   noTextAnswer: "（无文字回复）",
 
-  // Image recognition
-  visionNotEnabled: "Cagent：请先在「设置 → 视觉模型」中打开图片识别开关。",
-  visionNoKey: "Cagent：请先在设置中填写视觉模型 API Key。",
-  recognizing: "📷 正在识别图片…",
-  recognized: "📷 已识别（",
-  recognitionFailed: "📷 识别失败：",
-  visionError: "Cagent 识图：",
+  // Images (sent straight to the active model)
+  imageError: "Cagent 图片：",
+  imageDefaultPrompt: "请识别这张图片的内容；如果是题目，请给出完整解答。",
   removeImage: "移除图片",
 
   // Settings
   secGeneral: "通用",
   secTextModel: "文本模型",
-  secVision: "视觉模型（图片识别）",
   secChat: "对话显示",
   secHistory: "对话历史",
   language: "界面语言",
@@ -111,14 +106,9 @@ const zh = {
   switchToDropdown: "切换到下拉选择",
   switchToManual: "切换到手动输入",
 
-  vision: "视觉模型（图片识别）",
-  visionDesc: "用独立的多模态模型识别图片后，再把文字交给文本模型。启用后对话中出现 📷 按钮。",
-  visionBaseUrl: "视觉模型接口地址",
-  visionBaseUrlDesc: "视觉模型接口，例如阿里云百炼：https://dashscope.aliyuncs.com/compatible-mode/v1",
-  visionApiKey: "视觉模型 API Key",
-  visionApiKeyDesc: "视觉接口的令牌（百炼的 API Key 可直接使用）。",
-  visionModel: "视觉模型",
-  visionModelDesc: "多模态模型 ID。图文理解最强：qwen-vl-max（默认）；性价比：qwen-vl-plus；最新代：qwen3-vl-plus。",
+  imageSupport: "图片输入",
+  imageSupportDesc: "图片会直接发给当前模型，无需再单独配置视觉模型。请确保当前模型支持图片输入（如 DeepSeek 多模态模型、qwen-vl-max、gpt-4o 等）；纯文本模型上传图片会报错。",
+  imageUnsupportedHint: "当前模型可能不支持图片输入。请在「设置 → 模型配置」中切换为支持图片的多模态模型（如 DeepSeek 多模态模型 / qwen-vl-max / gpt-4o）。",
 
   secSearch: "联网搜索",
   search: "联网搜索（Web Search）",
@@ -194,7 +184,7 @@ export type Key = keyof typeof zh;
 const en: Record<Key, string> = {
   chatTitle: "Cagent chat",
   chatPlaceholder: "Ask the AI… (@ to reference notes, Shift+Enter for newline)",
-  addImage: "Add an image (vision)",
+  addImage: "Add an image",
   takePhoto: "Take photo",
   viewImage: "Click to view full image",
   viewImageFailed: "Image preview unavailable: file write not supported here.",
@@ -241,17 +231,13 @@ const en: Record<Key, string> = {
   noApiKey: "Cagent: set the API key in settings first.",
   noTextAnswer: "(no text answer)",
 
-  visionNotEnabled: "Cagent: enable 'Vision model' in settings to use images.",
-  visionNoKey: "Cagent: set the Vision API key in settings.",
-  recognizing: "📷 Recognizing image…",
-  recognized: "📷 Recognized (",
-  recognitionFailed: "📷 Recognition failed: ",
-  visionError: "Cagent vision: ",
+  // Images (sent straight to the active model)
+  imageError: "Cagent image: ",
+  imageDefaultPrompt: "Read this image. If it is a question, give a complete worked solution.",
   removeImage: "Remove image",
 
   secGeneral: "General",
   secTextModel: "Text model",
-  secVision: "Vision model (image recognition)",
   secChat: "Chat display",
   secHistory: "Chat history",
   language: "Interface language",
@@ -292,14 +278,9 @@ const en: Record<Key, string> = {
   switchToDropdown: "Switch to dropdown",
   switchToManual: "Switch to manual input",
 
-  vision: "Vision model (image recognition)",
-  visionDesc: "Recognize images with a separate multimodal model before they reach the text model. Enable to use the 📷 image button in chat.",
-  visionBaseUrl: "Vision Base URL",
-  visionBaseUrlDesc: "OpenAI-compatible endpoint for the vision model, e.g. DashScope: https://dashscope.aliyuncs.com/compatible-mode/v1",
-  visionApiKey: "Vision API key",
-  visionApiKeyDesc: "Bearer token for the vision endpoint. DashScope key works here.",
-  visionModel: "Vision model",
-  visionModelDesc: "Multimodal model id. Best image understanding: qwen-vl-max (default); budget: qwen-vl-plus; newest: qwen3-vl-plus.",
+  imageSupport: "Image input",
+  imageSupportDesc: "Images are sent straight to the active model — no separate vision model needed. Make sure the model accepts image input (a multimodal DeepSeek model, qwen-vl-max, gpt-4o…); text-only models will error on images.",
+  imageUnsupportedHint: "The current model may not accept image input. Switch to a multimodal model in Settings → Model profiles (e.g. a multimodal DeepSeek model / qwen-vl-max / gpt-4o).",
 
   secSearch: "Web Search",
   search: "Web search",

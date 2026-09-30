@@ -106,7 +106,14 @@ export default class AgentPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = ((await this.loadData()) ?? {}) as Record<string, unknown>;
+    // Legacy cleanup: the separate vision-model settings are gone — images are
+    // now sent straight to the active (multimodal) model, so drop the stale
+    // keys instead of carrying them around in data.json forever.
+    for (const key of ["visionEnabled", "visionBaseUrl", "visionApiKey", "visionModel"]) {
+      delete data[key];
+    }
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data) as AgentSettings;
     // Seed/migrate model profiles (old data has no profiles array).
     ensureProfiles(this.settings);
   }

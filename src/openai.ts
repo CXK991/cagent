@@ -6,7 +6,9 @@ import { requestUrl } from "obsidian";
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
-  /** Base64-encoded images attached to a user message (data URL without prefix). */
+  /** Base64-encoded images attached to a user message (data URL without prefix).
+   * They are sent to the model as OpenAI-style multimodal content parts, so the
+   * ACTIVE model must accept image input (multimodal DeepSeek / Qwen-VL / GPT-4o…). */
   images?: string[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
@@ -15,8 +17,8 @@ export interface ChatMessage {
   name?: string;
   /** Wall-clock timestamp (ms) used to display message times. */
   ts?: number;
-  /** User's original text (as typed), for display when images are attached.
-   * `content` then holds the full text sent to the model (incl. recognition). */
+  /** User's original text exactly as typed (display-only). `content` may instead
+   * hold a default instruction when the message consists of images only. */
   prompt?: string;
 }
 
@@ -24,6 +26,12 @@ export interface ChatMessage {
 interface ImageContentPart {
   type: "image_url";
   image_url: { url: string };
+}
+
+/** A plain-text part of a multimodal message. */
+interface TextContentPart {
+  type: "text";
+  text: string;
 }
 
 /**
@@ -202,16 +210,21 @@ function mapHttpError(status: number, detail: string): Error {
 export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
   const url = opts.baseUrl.replace(/\/+$/, "") + "/chat/completions";
 
-  // Strip non-standard fields (ts, prompt, images) before sending. They are
-  // display/UX-only; `images` in particular is huge base64 that the main text
-  // model never consumes (images are pre-recognized into `content` text).
-  // Sending them would inflate prompt tokens AND destabilize the byte prefix
-  // that prompt caches (DeepSeek context cache, etc.) match on.
-  const cleanMessages = opts.messages.map(({ ts, prompt, images, ...rest }) => rest);
+  // Build the wire payload. Display-only fields (ts, prompt) are stripped, and a
+  // user message's attached images are converted into OpenAI-style multimodal
+  // content parts so the active model sees the pictures directly. No separate
+  // vision pass is needed — multimodal models (DeepSeek, Qwen-VL, GPT-4o…)
+  // accept image_url parts on the same /chat/completions call.
+  const apiMessages = opts.messages.map(({ ts, prompt, images, ...rest }) => {
+    if (rest.role === "user" && images && images.length > 0) {
+      return { ...rest, content: buildMultimodalContent(rest.content ?? "", images) };
+    }
+    return rest;
+  });
 
   const body: Record<string, unknown> = {
     model: opts.model,
-    messages: cleanMessages,
+    messages: apiMessages,
   };
   if (opts.tools && opts.tools.length > 0) {
     body.tools = opts.tools;
@@ -343,71 +356,20 @@ export async function testConnection(baseUrl: string, apiKey: string, model: str
   }
 }
 
-/** Build an OpenAI-style multimodal user content array with inline base64 images. */
+/**
+ * Build an OpenAI-style multimodal user content array with inline base64 images.
+ * The text part is omitted when there is no text (image-only message), and every
+ * part is an object (`type: "text"` / `type: "image_url"`) as the chat-completions
+ * spec requires — stricter providers reject bare strings inside the array.
+ */
 export function buildMultimodalContent(
   text: string,
   images: string[]
-): Array<string | ImageContentPart> {
-  const parts: Array<string | ImageContentPart> = [text];
+): Array<TextContentPart | ImageContentPart> {
+  const parts: Array<TextContentPart | ImageContentPart> = [];
+  if (text && text.trim().length > 0) parts.push({ type: "text", text });
   for (const img of images) {
     parts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${img}` } });
   }
   return parts;
-}
-
-/**
- * Ask a vision model to transcribe/describe images as plain text.
- * Returns the model's text; throws typed errors on failure.
- * Used to let a non-multimodal text model (e.g. DeepSeek) "see" images first.
- */
-export async function visionDescribe(opts: {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  images: string[]; // base64 (no data: prefix)
-  prompt?: string;
-}): Promise<string> {
-  const url = opts.baseUrl.replace(/\/+$/, "") + "/chat/completions";
-  const prompt = opts.prompt ?? "Please recognize and transcribe the content of this image (text, formulas, and any structure). Return only the transcribed content, no commentary.";
-
-  const body: Record<string, unknown> = {
-    model: opts.model,
-    messages: [
-      {
-        role: "user",
-        content: buildMultimodalContent(prompt, opts.images),
-      },
-    ],
-  };
-
-  let res;
-  try {
-    res = await requestUrl({
-      url,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${opts.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      throw: false,
-    });
-  } catch (e) {
-    throw new NetworkError(`Network error talking to vision endpoint ${url}: ${(e as Error).message}`);
-  }
-
-  if (res.status >= 400) {
-    let detail = "";
-    try { detail = JSON.stringify(res.json); } catch { detail = res.text?.slice(0, 500) ?? ""; }
-    throw mapHttpError(res.status, detail);
-  }
-
-  const data = res.json;
-  const choice = data.choices?.[0];
-  if (!choice) throw new ProviderError("Vision model returned no choices");
-
-  const rawContent = typeof choice.message.content === "string" ? choice.message.content : "";
-  const { text } = extractThinking(choice.message.reasoning_content, rawContent);
-  if (!text) throw new ProviderError("Vision model returned empty content");
-  return text;
 }
