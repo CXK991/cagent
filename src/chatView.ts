@@ -6,6 +6,7 @@ import { type ChatMessage } from "./openai";
 import { t, type Key } from "./i18n";
 import { syncActiveProfile } from "./settings";
 import { SessionManagerModal, ConfirmModal } from "./sessionModal";
+import { ImageEditorModal } from "./imageEditor";
 import type AgentPlugin from "./main";
 
 /** Longest side for the downscaled image. */
@@ -334,6 +335,7 @@ export class AgentChatView extends ItemView {
     const tips = welcome.createDiv({ cls: "agent-welcome-tips" });
     const tipsList = [
       { icon: "camera", text: this.tr("welcomeTipPhoto") },
+      { icon: "crop", text: this.tr("welcomeTipEdit") },
       { icon: "help-circle", text: this.tr("welcomeTipAsk") },
       { icon: "notebook-pen", text: this.tr("welcomeTipWrongQ") },
       { icon: "image", text: this.tr("welcomeTipAnalyze") },
@@ -633,9 +635,20 @@ export class AgentChatView extends ItemView {
 
     const content = el.createDiv({ cls: "agent-msg-content" });
     for (const img of images) {
-      const thumb = content.createEl("img", { cls: "agent-msg-img", attr: { alt: img.name, title: this.tr("viewImage") } });
+      // Wrapper so the edit badge can sit on the thumbnail's corner.
+      const wrap = content.createDiv({ cls: "agent-msg-img-wrap" });
+      const thumb = wrap.createEl("img", { cls: "agent-msg-img", attr: { alt: img.name, title: this.tr("viewImage") } });
       thumb.src = `data:image/jpeg;base64,${img.data}`;
       thumb.addEventListener("click", () => void this.openImageViewer(img.data, img.name));
+      const edit = wrap.createEl("button", {
+        cls: "agent-msg-img-edit",
+        attr: { "aria-label": this.tr("editImage"), title: this.tr("editImage") },
+      });
+      setIcon(edit, "pencil");
+      edit.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.editSentImage(img.data, img.name);
+      });
     }
     if (text) content.createSpan({ text });
 
@@ -962,10 +975,46 @@ export class AgentChatView extends ItemView {
       const item = row.createDiv({ cls: "agent-preview-item" });
       const thumb = item.createEl("img", { cls: "agent-preview-thumb" });
       thumb.src = `data:image/jpeg;base64,${img.data}`;
+      // Tap the thumbnail (or the pencil) to crop / rotate / annotate it.
+      thumb.addEventListener("click", () => this.editPendingImage(i));
+      const edit = item.createEl("button", {
+        cls: "agent-preview-edit",
+        attr: { "aria-label": this.tr("editImage"), title: this.tr("editImage") },
+      });
+      setIcon(edit, "pencil");
+      edit.addEventListener("click", () => this.editPendingImage(i));
       const del = item.createEl("button", { cls: "agent-preview-del", attr: { "aria-label": this.tr("removeImage") } });
       setIcon(del, "x");
       del.addEventListener("click", () => this.removePendingImage(i));
     });
+  }
+
+  /** Open the image editor for a queued attachment, then replace it in place. */
+  private editPendingImage(idx: number): void {
+    const img = this.pendingImages[idx];
+    if (!img) return;
+    new ImageEditorModal(this.app, this.plugin, {
+      image: img.data,
+      onSave: (data) => {
+        const current = this.pendingImages[idx];
+        if (!current) return;
+        this.pendingImages[idx] = { data, name: current.name };
+        this.renderPreview();
+      },
+    }).open();
+  }
+
+  /** Open the image editor for an already-sent image; the result is queued as a
+   * new attachment so the user can add text and send it. */
+  private editSentImage(data: string, name: string): void {
+    new ImageEditorModal(this.app, this.plugin, {
+      image: data,
+      onSave: (edited) => {
+        this.pendingImages.push({ data: edited, name });
+        this.renderPreview();
+        new Notice(this.tr("imageEditedQueued"));
+      },
+    }).open();
   }
 
   private async send(): Promise<void> {
